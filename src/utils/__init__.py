@@ -1,7 +1,11 @@
 """
-Utilities package for the financial analysis platform.
+Utility modules for financial analysis platform.
+Includes logging, caching, and helper functions.
 """
 
-from .logger import get_logger, configure_logging
+from src.utils.logger import configure_logging, get_logger
 
-__all__ = ['get_logger', 'configure_logging']
+__all__ = [
+    "configure_logging",
+    "get_logger",
+]
