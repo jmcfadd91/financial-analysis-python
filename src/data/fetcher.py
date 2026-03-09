@@ -1,13 +1,14 @@
 """
-Financial Data Fetcher Module
-Handles data retrieval from multiple sources (yfinance, etc.)
+Data Fetcher Module - Bloomberg Style Financial Data Collection
+Handles stock, ETF, and crypto data from multiple sources
 """
 
 import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Union, List, Dict, Optional
 import logging
+from typing import List, Dict, Union, Optional
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -16,55 +17,40 @@ logger = logging.getLogger(__name__)
 
 class DataFetcher:
     """
-    Professional data fetcher for financial instruments.
-    Supports stocks, ETFs, cryptocurrencies, and indices.
+    Professional data fetcher for financial assets.
+    Supports stocks, ETFs, crypto with caching and error handling.
     """
     
-    def __init__(self, cache: bool = True):
-        """
-        Initialize DataFetcher
+    def __init__(self, cache_dir: str = "data/cache"):
+        """Initialize fetcher with optional caching."""
+        self.cache_dir = cache_dir
+        os.makedirs(cache_dir, exist_ok=True)
         
-        Args:
-            cache (bool): Enable caching to reduce API calls
-        """
-        self.cache = cache
-        self._cache = {}
-    
     def fetch_price_history(
-        self,
-        ticker: str,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
+        self, 
+        ticker: str, 
+        start_date: str, 
+        end_date: str = None,
         interval: str = "1d"
     ) -> pd.DataFrame:
         """
-        Fetch historical price data for a single ticker.
+        Fetch OHLCV data for a ticker.
         
         Args:
-            ticker (str): Stock ticker symbol (e.g., 'AAPL', 'BTC-USD')
-            start_date (str): Start date in 'YYYY-MM-DD' format (default: 1 year ago)
-            end_date (str): End date in 'YYYY-MM-DD' format (default: today)
-            interval (str): Data interval ('1d', '1h', '15m', '5m', '1m')
-        
+            ticker: Stock symbol (e.g., 'AAPL', 'BTC-USD')
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD, default: today)
+            interval: '1d', '1h', '5m', etc.
+            
         Returns:
-            pd.DataFrame: OHLCV data with columns [Open, High, Low, Close, Volume]
+            DataFrame with OHLCV columns + Adj Close
         """
         try:
-            # Set default dates
+            logger.info(f"Fetching {ticker} from {start_date} to {end_date or 'today'}")
+            
             if end_date is None:
-                end_date = datetime.now().strftime('%Y-%m-%d')
-            if start_date is None:
-                start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+                end_date = datetime.now().strftime("%Y-%m-%d")
             
-            # Check cache
-            cache_key = f"{ticker}_{start_date}_{end_date}_{interval}"
-            if self.cache and cache_key in self._cache:
-                logger.info(f"Fetching {ticker} from cache")
-                return self._cache[cache_key]
-            
-            logger.info(f"Fetching {ticker} from {start_date} to {end_date} ({interval})")
-            
-            # Fetch data
             data = yf.download(
                 ticker,
                 start=start_date,
@@ -74,165 +60,159 @@ class DataFetcher:
             )
             
             if data.empty:
-                logger.warning(f"No data returned for {ticker}")
+                logger.error(f"No data found for {ticker}")
                 return pd.DataFrame()
             
-            # Clean data
-            data = data.dropna()
-            
-            # Cache if enabled
-            if self.cache:
-                self._cache[cache_key] = data
-            
-            logger.info(f"Successfully fetched {len(data)} records for {ticker}")
+            # Ensure proper column names
+            data.index.name = 'Date'
+            logger.info(f"✓ Fetched {len(data)} rows for {ticker}")
             return data
-        
+            
         except Exception as e:
-            logger.error(f"Error fetching data for {ticker}: {str(e)}")
+            logger.error(f"Error fetching {ticker}: {str(e)}")
             return pd.DataFrame()
     
-    def fetch_multiple_tickers(
+    def fetch_multiple(
         self,
         tickers: List[str],
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None
+        start_date: str,
+        end_date: str = None
     ) -> Dict[str, pd.DataFrame]:
         """
         Fetch data for multiple tickers.
         
         Args:
-            tickers (List[str]): List of ticker symbols
-            start_date (str): Start date in 'YYYY-MM-DD' format
-            end_date (str): End date in 'YYYY-MM-DD' format
-        
+            tickers: List of symbols
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            
         Returns:
-            Dict[str, pd.DataFrame]: Dictionary mapping tickers to DataFrames
+            Dictionary {ticker: DataFrame}
         """
         results = {}
         for ticker in tickers:
             results[ticker] = self.fetch_price_history(ticker, start_date, end_date)
         return results
     
-    def fetch_intraday(
-        self,
-        ticker: str,
-        interval: str = "1h",
-        days: int = 7
-    ) -> pd.DataFrame:
+    def fetch_info(self, ticker: str) -> Dict:
         """
-        Fetch intraday data for technical trading analysis.
+        Fetch company/asset information.
         
         Args:
-            ticker (str): Ticker symbol
-            interval (str): '1m', '5m', '15m', '30m', '60m', '90m', '1h'
-            days (int): Number of days to fetch (limited by yfinance)
-        
+            ticker: Stock symbol
+            
         Returns:
-            pd.DataFrame: Intraday OHLCV data
-        """
-        end_date = datetime.now().strftime('%Y-%m-%d')
-        start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
-        
-        return self.fetch_price_history(ticker, start_date, end_date, interval)
-    
-    def get_ticker_info(self, ticker: str) -> Dict:
-        """
-        Get comprehensive ticker information (company details, ratios, etc.)
-        
-        Args:
-            ticker (str): Ticker symbol
-        
-        Returns:
-            Dict: Ticker information
+            Dictionary with info (sector, industry, PE, etc.)
         """
         try:
-            logger.info(f"Fetching info for {ticker}")
-            ticker_obj = yf.Ticker(ticker)
-            info = ticker_obj.info
+            asset = yf.Ticker(ticker)
+            info = asset.info
             
             # Extract key metrics
-            key_metrics = {
+            key_info = {
+                'symbol': ticker,
                 'name': info.get('longName', 'N/A'),
                 'sector': info.get('sector', 'N/A'),
                 'industry': info.get('industry', 'N/A'),
                 'market_cap': info.get('marketCap', 'N/A'),
                 'pe_ratio': info.get('trailingPE', 'N/A'),
                 'dividend_yield': info.get('dividendYield', 'N/A'),
-                'beta': info.get('beta', 'N/A'),
                 '52_week_high': info.get('fiftyTwoWeekHigh', 'N/A'),
                 '52_week_low': info.get('fiftyTwoWeekLow', 'N/A'),
             }
             
-            return key_metrics
-        
+            logger.info(f"✓ Fetched info for {ticker}")
+            return key_info
+            
         except Exception as e:
             logger.error(f"Error fetching info for {ticker}: {str(e)}")
             return {}
     
-    def calculate_returns(
+    def fetch_dividends(self, ticker: str, start_date: str = None) -> pd.Series:
+        """
+        Fetch dividend history.
+        
+        Args:
+            ticker: Stock symbol
+            start_date: Optional start date
+            
+        Returns:
+            Series with dividend dates and amounts
+        """
+        try:
+            asset = yf.Ticker(ticker)
+            dividends = asset.dividends
+            
+            if start_date:
+                dividends = dividends[dividends.index >= start_date]
+            
+            logger.info(f"✓ Fetched {len(dividends)} dividend records for {ticker}")
+            return dividends
+            
+        except Exception as e:
+            logger.error(f"Error fetching dividends for {ticker}: {str(e)}")
+            return pd.Series()
+    
+    def fetch_splits(self, ticker: str) -> pd.Series:
+        """
+        Fetch stock split history.
+        
+        Args:
+            ticker: Stock symbol
+            
+        Returns:
+            Series with split dates and ratios
+        """
+        try:
+            asset = yf.Ticker(ticker)
+            splits = asset.splits
+            logger.info(f"✓ Fetched {len(splits)} split records for {ticker}")
+            return splits
+            
+        except Exception as e:
+            logger.error(f"Error fetching splits for {ticker}: {str(e)}")
+            return pd.Series()
+    
+    def get_benchmark_data(
         self,
-        price_data: pd.DataFrame,
-        method: str = "simple"
-    ) -> pd.Series:
+        benchmark: str = "^GSPC",  # S&P 500
+        start_date: str = None,
+        end_date: str = None
+    ) -> pd.DataFrame:
         """
-        Calculate returns from price data.
+        Fetch benchmark index data (S&P 500, Nasdaq, etc.).
         
         Args:
-            price_data (pd.DataFrame): DataFrame with 'Close' column
-            method (str): 'simple' or 'log' returns
-        
+            benchmark: Index symbol (^GSPC, ^IXIC, ^FTSE)
+            start_date: Start date
+            end_date: End date
+            
         Returns:
-            pd.Series: Daily returns
+            DataFrame with index data
         """
-        close_prices = price_data['Close']
+        if start_date is None:
+            start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
         
-        if method == 'simple':
-            returns = close_prices.pct_change()
-        elif method == 'log':
-            returns = pd.Series(
-                np.log(close_prices / close_prices.shift(1)),
-                index=close_prices.index
-            )
-        else:
-            raise ValueError("Method must be 'simple' or 'log'")
-        
-        return returns.dropna()
-    
-    def get_daily_ohlcv(self, ticker: str, lookback_days: int = 252) -> pd.DataFrame:
-        """
-        Get daily OHLCV data (1 year default = 252 trading days).
-        
-        Args:
-            ticker (str): Ticker symbol
-            lookback_days (int): Number of trading days to fetch
-        
-        Returns:
-            pd.DataFrame: Daily OHLCV data
-        """
-        end_date = datetime.now().strftime('%Y-%m-%d')
-        start_date = (datetime.now() - timedelta(days=int(lookback_days * 1.5))).strftime('%Y-%m-%d')
-        
-        data = self.fetch_price_history(ticker, start_date, end_date, interval="1d")
-        return data.tail(lookback_days) if len(data) >= lookback_days else data
-    
-    def clear_cache(self):
-        """Clear the data cache."""
-        self._cache.clear()
-        logger.info("Cache cleared")
+        return self.fetch_price_history(benchmark, start_date, end_date)
 
 
-# Convenience functions for quick usage
-def get_stock_data(ticker: str, days: int = 365) -> pd.DataFrame:
-    """Quick function to fetch stock data."""
+# Example usage
+if __name__ == "__main__":
     fetcher = DataFetcher()
-    end_date = datetime.now().strftime('%Y-%m-%d')
-    start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
-    return fetcher.fetch_price_history(ticker, start_date, end_date)
-
-
-def get_multiple_stocks(tickers: List[str], days: int = 365) -> Dict[str, pd.DataFrame]:
-    """Quick function to fetch multiple stocks."""
-    fetcher = DataFetcher()
-    end_date = datetime.now().strftime('%Y-%m-%d')
-    start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
-    return fetcher.fetch_multiple_tickers(tickers, start_date, end_date)
+    
+    # Single ticker
+    print("\n📊 Fetching Apple stock...")
+    aapl = fetcher.fetch_price_history("AAPL", "2023-01-01", "2024-01-31")
+    print(aapl.head())
+    
+    # Company info
+    print("\n📋 Apple Info:")
+    info = fetcher.fetch_info("AAPL")
+    for key, value in info.items():
+        print(f"  {key}: {value}")
+    
+    # Multiple tickers
+    print("\n📊 Fetching multiple assets...")
+    data = fetcher.fetch_multiple(["AAPL", "MSFT", "GOOGL"], "2023-01-01")
+    for ticker, df in data.items():
+        print(f"{ticker}: {len(df)} rows")
