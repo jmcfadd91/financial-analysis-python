@@ -1,56 +1,68 @@
 """
-Data Fetcher Module - Bloomberg Style Financial Data Collection
-Handles stock, ETF, and crypto data from multiple sources
+Data Fetcher Module - Retrieve financial data from multiple sources
+Bloomberg-style financial analysis project
 """
 
 import yfinance as yf
 import pandas as pd
+import numpy as np
+from typing import List, Tuple, Optional, Dict
 from datetime import datetime, timedelta
 import logging
-from typing import List, Dict, Union, Optional
-import os
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 class DataFetcher:
     """
-    Professional data fetcher for financial assets.
-    Supports stocks, ETFs, crypto with caching and error handling.
+    Unified data fetcher for stocks, ETFs, and cryptocurrencies
+    Supports multiple timeframes and data sources
     """
-    
-    def __init__(self, cache_dir: str = "data/cache"):
-        """Initialize fetcher with optional caching."""
-        self.cache_dir = cache_dir
-        os.makedirs(cache_dir, exist_ok=True)
+
+    def __init__(self, cache_dir: str = "./data/cache"):
+        """
+        Initialize DataFetcher
         
-    def fetch_price_history(
-        self, 
-        ticker: str, 
-        start_date: str, 
-        end_date: str = None,
+        Args:
+            cache_dir: Directory to cache downloaded data
+        """
+        self.cache_dir = cache_dir
+        self.data_cache = {}
+
+    def fetch_historical_data(
+        self,
+        ticker: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
         interval: str = "1d"
     ) -> pd.DataFrame:
         """
-        Fetch OHLCV data for a ticker.
+        Fetch historical OHLCV data for a single asset
         
         Args:
-            ticker: Stock symbol (e.g., 'AAPL', 'BTC-USD')
-            start_date: Start date (YYYY-MM-DD)
-            end_date: End date (YYYY-MM-DD, default: today)
-            interval: '1d', '1h', '5m', etc.
-            
+            ticker: Asset ticker (e.g., 'AAPL', 'BTC-USD')
+            start_date: Start date (YYYY-MM-DD), default: 1 year ago
+            end_date: End date (YYYY-MM-DD), default: today
+            interval: '1d', '1wk', '1mo', '1h', '5m', etc.
+        
         Returns:
-            DataFrame with OHLCV columns + Adj Close
+            DataFrame with OHLCV data
         """
+        if start_date is None:
+            start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+        if end_date is None:
+            end_date = datetime.now().strftime("%Y-%m-%d")
+
+        cache_key = f"{ticker}_{start_date}_{end_date}_{interval}"
+
+        # Check cache
+        if cache_key in self.data_cache:
+            logger.info(f"Loading {ticker} from cache")
+            return self.data_cache[cache_key]
+
         try:
-            logger.info(f"Fetching {ticker} from {start_date} to {end_date or 'today'}")
-            
-            if end_date is None:
-                end_date = datetime.now().strftime("%Y-%m-%d")
-            
+            logger.info(f"Fetching {ticker} from {start_date} to {end_date}")
             data = yf.download(
                 ticker,
                 start=start_date,
@@ -58,161 +70,185 @@ class DataFetcher:
                 interval=interval,
                 progress=False
             )
-            
-            if data.empty:
-                logger.error(f"No data found for {ticker}")
-                return pd.DataFrame()
-            
+
             # Ensure proper column names
-            data.index.name = 'Date'
-            logger.info(f"✓ Fetched {len(data)} rows for {ticker}")
+            data.columns = [col.lower() for col in data.columns]
+
+            # Cache the data
+            self.data_cache[cache_key] = data
+
+            logger.info(f"✓ Successfully fetched {len(data)} records for {ticker}")
             return data
-            
+
         except Exception as e:
             logger.error(f"Error fetching {ticker}: {str(e)}")
             return pd.DataFrame()
-    
-    def fetch_multiple(
+
+    def fetch_multiple_tickers(
         self,
         tickers: List[str],
-        start_date: str,
-        end_date: str = None
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        interval: str = "1d"
     ) -> Dict[str, pd.DataFrame]:
         """
-        Fetch data for multiple tickers.
+        Fetch data for multiple tickers
         
         Args:
-            tickers: List of symbols
+            tickers: List of ticker symbols
             start_date: Start date (YYYY-MM-DD)
             end_date: End date (YYYY-MM-DD)
-            
+            interval: Time interval
+        
         Returns:
-            Dictionary {ticker: DataFrame}
+            Dictionary with ticker as key, DataFrame as value
         """
         results = {}
         for ticker in tickers:
-            results[ticker] = self.fetch_price_history(ticker, start_date, end_date)
+            results[ticker] = self.fetch_historical_data(
+                ticker, start_date, end_date, interval
+            )
         return results
-    
-    def fetch_info(self, ticker: str) -> Dict:
+
+    def get_stock_info(self, ticker: str) -> Dict:
         """
-        Fetch company/asset information.
+        Get company info and current metrics
         
         Args:
-            ticker: Stock symbol
-            
+            ticker: Stock ticker
+        
         Returns:
-            Dictionary with info (sector, industry, PE, etc.)
+            Dictionary with company info
         """
         try:
-            asset = yf.Ticker(ticker)
-            info = asset.info
-            
-            # Extract key metrics
-            key_info = {
-                'symbol': ticker,
-                'name': info.get('longName', 'N/A'),
-                'sector': info.get('sector', 'N/A'),
-                'industry': info.get('industry', 'N/A'),
-                'market_cap': info.get('marketCap', 'N/A'),
-                'pe_ratio': info.get('trailingPE', 'N/A'),
-                'dividend_yield': info.get('dividendYield', 'N/A'),
-                '52_week_high': info.get('fiftyTwoWeekHigh', 'N/A'),
-                '52_week_low': info.get('fiftyTwoWeekLow', 'N/A'),
+            ticker_obj = yf.Ticker(ticker)
+            info = ticker_obj.info
+
+            return {
+                "name": info.get("longName", "N/A"),
+                "sector": info.get("sector", "N/A"),
+                "industry": info.get("industry", "N/A"),
+                "market_cap": info.get("marketCap", "N/A"),
+                "pe_ratio": info.get("trailingPE", "N/A"),
+                "dividend_yield": info.get("dividendYield", "N/A"),
+                "52_week_high": info.get("fiftyTwoWeekHigh", "N/A"),
+                "52_week_low": info.get("fiftyTwoWeekLow", "N/A"),
+                "current_price": info.get("currentPrice", "N/A"),
             }
-            
-            logger.info(f"✓ Fetched info for {ticker}")
-            return key_info
-            
         except Exception as e:
             logger.error(f"Error fetching info for {ticker}: {str(e)}")
             return {}
-    
-    def fetch_dividends(self, ticker: str, start_date: str = None) -> pd.Series:
+
+    def calculate_returns(self, data: pd.DataFrame) -> pd.Series:
         """
-        Fetch dividend history.
+        Calculate daily returns from OHLCV data
         
         Args:
-            ticker: Stock symbol
-            start_date: Optional start date
-            
+            data: DataFrame with 'close' column
+        
         Returns:
-            Series with dividend dates and amounts
+            Series of daily returns
         """
-        try:
-            asset = yf.Ticker(ticker)
-            dividends = asset.dividends
-            
-            if start_date:
-                dividends = dividends[dividends.index >= start_date]
-            
-            logger.info(f"✓ Fetched {len(dividends)} dividend records for {ticker}")
-            return dividends
-            
-        except Exception as e:
-            logger.error(f"Error fetching dividends for {ticker}: {str(e)}")
+        if "close" not in data.columns:
+            logger.error("DataFrame must contain 'close' column")
             return pd.Series()
-    
-    def fetch_splits(self, ticker: str) -> pd.Series:
+
+        returns = data["close"].pct_change()
+        return returns
+
+    def calculate_log_returns(self, data: pd.DataFrame) -> pd.Series:
         """
-        Fetch stock split history.
+        Calculate log returns from OHLCV data
         
         Args:
-            ticker: Stock symbol
-            
+            data: DataFrame with 'close' column
+        
         Returns:
-            Series with split dates and ratios
+            Series of log returns
         """
-        try:
-            asset = yf.Ticker(ticker)
-            splits = asset.splits
-            logger.info(f"✓ Fetched {len(splits)} split records for {ticker}")
-            return splits
-            
-        except Exception as e:
-            logger.error(f"Error fetching splits for {ticker}: {str(e)}")
+        if "close" not in data.columns:
+            logger.error("DataFrame must contain 'close' column")
             return pd.Series()
-    
-    def get_benchmark_data(
+
+        log_returns = np.log(data["close"] / data["close"].shift(1))
+        return log_returns
+
+    def get_correlation_matrix(
         self,
-        benchmark: str = "^GSPC",  # S&P 500
-        start_date: str = None,
-        end_date: str = None
+        tickers: List[str],
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
     ) -> pd.DataFrame:
         """
-        Fetch benchmark index data (S&P 500, Nasdaq, etc.).
+        Calculate correlation matrix between multiple assets
         
         Args:
-            benchmark: Index symbol (^GSPC, ^IXIC, ^FTSE)
+            tickers: List of ticker symbols
             start_date: Start date
             end_date: End date
-            
-        Returns:
-            DataFrame with index data
-        """
-        if start_date is None:
-            start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
         
-        return self.fetch_price_history(benchmark, start_date, end_date)
+        Returns:
+            Correlation matrix DataFrame
+        """
+        data_dict = self.fetch_multiple_tickers(tickers, start_date, end_date)
+        
+        # Extract closing prices
+        closes = pd.DataFrame()
+        for ticker, data in data_dict.items():
+            if not data.empty:
+                closes[ticker] = data["close"]
+
+        # Calculate returns correlation
+        returns = closes.pct_change().dropna()
+        correlation = returns.corr()
+
+        logger.info(f"Correlation matrix calculated for {len(tickers)} assets")
+        return correlation
+
+    def validate_data(self, data: pd.DataFrame) -> Tuple[bool, str]:
+        """
+        Validate downloaded data quality
+        
+        Args:
+            data: DataFrame to validate
+        
+        Returns:
+            Tuple of (is_valid, message)
+        """
+        if data.empty:
+            return False, "DataFrame is empty"
+
+        required_columns = ["open", "high", "low", "close", "volume"]
+        missing = [col for col in required_columns if col not in data.columns]
+
+        if missing:
+            return False, f"Missing columns: {missing}"
+
+        # Check for NaN values
+        nan_count = data.isnull().sum().sum()
+        if nan_count > 0:
+            logger.warning(f"Found {nan_count} NaN values in data")
+
+        return True, "Data validation passed"
 
 
-# Example usage
 if __name__ == "__main__":
+    # Example usage
     fetcher = DataFetcher()
-    
-    # Single ticker
-    print("\n📊 Fetching Apple stock...")
-    aapl = fetcher.fetch_price_history("AAPL", "2023-01-01", "2024-01-31")
-    print(aapl.head())
-    
-    # Company info
-    print("\n📋 Apple Info:")
-    info = fetcher.fetch_info("AAPL")
-    for key, value in info.items():
-        print(f"  {key}: {value}")
-    
-    # Multiple tickers
-    print("\n📊 Fetching multiple assets...")
-    data = fetcher.fetch_multiple(["AAPL", "MSFT", "GOOGL"], "2023-01-01")
-    for ticker, df in data.items():
-        print(f"{ticker}: {len(df)} rows")
+
+    # Fetch single ticker
+    aapl = fetcher.fetch_historical_data("AAPL", interval="1d")
+    print(f"\nAAPL Data:\n{aapl.head()}")
+
+    # Get stock info
+    info = fetcher.get_stock_info("AAPL")
+    print(f"\nAAPL Info:\n{info}")
+
+    # Calculate returns
+    returns = fetcher.calculate_returns(aapl)
+    print(f"\nReturns Stats:\n{returns.describe()}")
+
+    # Correlation matrix
+    tickers = ["AAPL", "MSFT", "GOOGL"]
+    corr = fetcher.get_correlation_matrix(tickers)
+    print(f"\nCorrelation Matrix:\n{corr}")
