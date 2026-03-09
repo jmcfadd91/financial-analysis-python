@@ -1,7 +1,5 @@
-"""
-Technical and fundamental analysis module for financial data.
-"""
+"""Technical and Risk Analysis modules for financial analysis platform."""
 
-from .technical import TechnicalAnalyzer
+from .technical import TechnicalAnalysis
 
-__all__ = ["TechnicalAnalyzer"]
+__all__ = ["TechnicalAnalysis"]
