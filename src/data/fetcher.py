@@ -9,8 +9,13 @@ import numpy as np
 from typing import List, Tuple, Optional, Dict
 from datetime import datetime, timedelta
 import logging
+import time
 
-logging.basicConfig(level=logging.INFO)
+# Configure logging with proper format
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 
@@ -20,15 +25,35 @@ class DataFetcher:
     Supports multiple timeframes and data sources
     """
 
-    def __init__(self, cache_dir: str = "./data/cache"):
+    def __init__(self, cache_dir: str = "./data/cache", cache_ttl: int = 3600):
         """
         Initialize DataFetcher
         
         Args:
             cache_dir: Directory to cache downloaded data
+            cache_ttl: Cache time-to-live in seconds (default: 1 hour)
         """
         self.cache_dir = cache_dir
         self.data_cache = {}
+        self.cache_timestamps = {}  # Track cache entry timestamps
+        self.cache_ttl = cache_ttl
+        self.rate_limit_delay = 0.5  # 500ms delay between API calls
+
+    def _is_cache_valid(self, cache_key: str) -> bool:
+        """
+        Check if cache entry is still valid based on TTL
+        
+        Args:
+            cache_key: Cache key to check
+        
+        Returns:
+            True if cache is valid, False if expired
+        """
+        if cache_key not in self.cache_timestamps:
+            return False
+        
+        elapsed = time.time() - self.cache_timestamps[cache_key]
+        return elapsed < self.cache_ttl
 
     def fetch_historical_data(
         self,
@@ -56,9 +81,9 @@ class DataFetcher:
 
         cache_key = f"{ticker}_{start_date}_{end_date}_{interval}"
 
-        # Check cache
-        if cache_key in self.data_cache:
-            logger.info(f"Loading {ticker} from cache")
+        # Check cache with TTL validation
+        if cache_key in self.data_cache and self._is_cache_valid(cache_key):
+            logger.info(f"Loading {ticker} from cache (valid)")
             return self.data_cache[cache_key]
 
         try:
@@ -74,10 +99,15 @@ class DataFetcher:
             # Ensure proper column names
             data.columns = [col.lower() for col in data.columns]
 
-            # Cache the data
+            # Cache the data with timestamp
             self.data_cache[cache_key] = data
+            self.cache_timestamps[cache_key] = time.time()
 
             logger.info(f"✓ Successfully fetched {len(data)} records for {ticker}")
+            
+            # Rate limiting - prevent API throttling
+            time.sleep(self.rate_limit_delay)
+            
             return data
 
         except Exception as e:
@@ -92,7 +122,7 @@ class DataFetcher:
         interval: str = "1d"
     ) -> Dict[str, pd.DataFrame]:
         """
-        Fetch data for multiple tickers
+        Fetch data for multiple tickers with rate limiting
         
         Args:
             tickers: List of ticker symbols
@@ -104,10 +134,14 @@ class DataFetcher:
             Dictionary with ticker as key, DataFrame as value
         """
         results = {}
-        for ticker in tickers:
+        for i, ticker in enumerate(tickers):
             results[ticker] = self.fetch_historical_data(
                 ticker, start_date, end_date, interval
             )
+            # Add delay between requests (except for cached data)
+            if i < len(tickers) - 1:
+                time.sleep(self.rate_limit_delay)
+        
         return results
 
     def get_stock_info(self, ticker: str) -> Dict:
@@ -125,6 +159,7 @@ class DataFetcher:
             info = ticker_obj.info
 
             return {
+                "ticker": ticker,
                 "name": info.get("longName", "N/A"),
                 "sector": info.get("sector", "N/A"),
                 "industry": info.get("industry", "N/A"),
@@ -134,10 +169,15 @@ class DataFetcher:
                 "52_week_high": info.get("fiftyTwoWeekHigh", "N/A"),
                 "52_week_low": info.get("fiftyTwoWeekLow", "N/A"),
                 "current_price": info.get("currentPrice", "N/A"),
+                "error": False
             }
         except Exception as e:
             logger.error(f"Error fetching info for {ticker}: {str(e)}")
-            return {}
+            return {
+                "ticker": ticker,
+                "error": True,
+                "error_message": str(e)
+            }
 
     def calculate_returns(self, data: pd.DataFrame) -> pd.Series:
         """
@@ -198,8 +238,13 @@ class DataFetcher:
             if not data.empty:
                 closes[ticker] = data["close"]
 
-        # Calculate returns correlation
-        returns = closes.pct_change().dropna()
+        # Calculate returns correlation - improved NaN handling
+        returns = closes.pct_change().dropna(how='any')  # Remove rows with ANY NaN
+        
+        if returns.empty:
+            logger.warning("Insufficient data for correlation calculation")
+            return pd.DataFrame()
+        
         correlation = returns.corr()
 
         logger.info(f"Correlation matrix calculated for {len(tickers)} assets")
@@ -230,6 +275,37 @@ class DataFetcher:
             logger.warning(f"Found {nan_count} NaN values in data")
 
         return True, "Data validation passed"
+
+    def clear_cache(self, older_than_hours: Optional[int] = None) -> int:
+        """
+        Clear cache entries, optionally only older than specified hours
+        
+        Args:
+            older_than_hours: Remove cache entries older than N hours (None = clear all)
+        
+        Returns:
+            Number of entries cleared
+        """
+        if older_than_hours is None:
+            cleared = len(self.data_cache)
+            self.data_cache.clear()
+            self.cache_timestamps.clear()
+            logger.info(f"Cleared {cleared} cache entries")
+            return cleared
+        
+        current_time = time.time()
+        cutoff_time = current_time - (older_than_hours * 3600)
+        keys_to_remove = [
+            key for key, timestamp in self.cache_timestamps.items()
+            if timestamp < cutoff_time
+        ]
+        
+        for key in keys_to_remove:
+            del self.data_cache[key]
+            del self.cache_timestamps[key]
+        
+        logger.info(f"Cleared {len(keys_to_remove)} cache entries older than {older_than_hours} hours")
+        return len(keys_to_remove)
 
 
 if __name__ == "__main__":
