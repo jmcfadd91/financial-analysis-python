@@ -1,5 +1,7 @@
-"""Utility modules for financial analysis platform."""
+"""
+Utilities package for the financial analysis platform.
+"""
 
-from .logger import setup_logger
+from .logger import get_logger, configure_logging
 
-__all__ = ["setup_logger"]
+__all__ = ['get_logger', 'configure_logging']
