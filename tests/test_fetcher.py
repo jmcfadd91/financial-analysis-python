@@ -9,7 +9,7 @@ import os
 # Add the parent directory to sys.path so we can import DataFetcher
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.data_fetcher import DataFetcher
+from src.data.fetcher import DataFetcher
 
 
 class TestDataFetcherInitialization(unittest.TestCase):
@@ -112,7 +112,7 @@ class TestCacheValidation(unittest.TestCase):
 class TestFetchHistoricalData(unittest.TestCase):
     """Test fetch_historical_data method"""
     
-    @patch('src.data_fetcher.yf.download')
+    @patch('src.data.fetcher.yf.download')
     def test_fetch_historical_data_success(self, mock_download):
         """Test successful historical data fetch"""
         mock_data = pd.DataFrame({
@@ -130,7 +130,7 @@ class TestFetchHistoricalData(unittest.TestCase):
         pd.testing.assert_frame_equal(result, mock_data)
         mock_download.assert_called_once()
     
-    @patch('src.data_fetcher.yf.download')
+    @patch('src.data.fetcher.yf.download')
     def test_fetch_historical_data_default_dates(self, mock_download):
         """Test historical data fetch with default date parameters"""
         mock_data = pd.DataFrame({'Close': [100, 101, 102]})
@@ -142,7 +142,7 @@ class TestFetchHistoricalData(unittest.TestCase):
         mock_download.assert_called_once()
         pd.testing.assert_frame_equal(result, mock_data)
     
-    @patch('src.data_fetcher.yf.download')
+    @patch('src.data.fetcher.yf.download')
     def test_fetch_historical_data_uses_cache(self, mock_download):
         """Test that cache is used on subsequent calls"""
         mock_data = pd.DataFrame({'Close': [100, 101, 102]})
@@ -159,7 +159,7 @@ class TestFetchHistoricalData(unittest.TestCase):
         mock_download.assert_called_once()
         pd.testing.assert_frame_equal(result1, result2)
     
-    @patch('src.data_fetcher.yf.download')
+    @patch('src.data.fetcher.yf.download')
     def test_fetch_historical_data_cache_expired(self, mock_download):
         """Test that cache is not used when expired"""
         mock_data = pd.DataFrame({'Close': [100, 101, 102]})
@@ -181,7 +181,7 @@ class TestFetchHistoricalData(unittest.TestCase):
         # Should be called twice now
         self.assertEqual(mock_download.call_count, 2)
     
-    @patch('src.data_fetcher.yf.download')
+    @patch('src.data.fetcher.yf.download')
     def test_fetch_historical_data_handles_empty_response(self, mock_download):
         """Test handling of empty data from yfinance"""
         mock_download.return_value = pd.DataFrame()
@@ -191,7 +191,7 @@ class TestFetchHistoricalData(unittest.TestCase):
         
         self.assertTrue(result.empty)
     
-    @patch('src.data_fetcher.yf.download')
+    @patch('src.data.fetcher.yf.download')
     def test_fetch_historical_data_network_error(self, mock_download):
         """Test handling of network errors"""
         mock_download.side_effect = Exception("Network error")
@@ -200,7 +200,7 @@ class TestFetchHistoricalData(unittest.TestCase):
         with self.assertRaises(Exception):
             fetcher.fetch_historical_data('AAPL', start='2023-01-01', end='2023-01-03')
     
-    @patch('src.data_fetcher.yf.download')
+    @patch('src.data.fetcher.yf.download')
     def test_fetch_historical_data_column_normalization(self, mock_download):
         """Test that columns are properly handled"""
         mock_data = pd.DataFrame({
@@ -221,7 +221,7 @@ class TestFetchHistoricalData(unittest.TestCase):
 class TestFetchMultipleTickers(unittest.TestCase):
     """Test fetching data for multiple tickers"""
     
-    @patch('src.data_fetcher.yf.download')
+    @patch('src.data.fetcher.yf.download')
     def test_fetch_multiple_tickers(self, mock_download):
         """Test fetching data for multiple tickers"""
         mock_data = pd.DataFrame({
@@ -242,7 +242,7 @@ class TestFetchMultipleTickers(unittest.TestCase):
         self.assertIn('MSFT', results)
         self.assertIn('GOOGL', results)
     
-    @patch('src.data_fetcher.yf.download')
+    @patch('src.data.fetcher.yf.download')
     def test_fetch_multiple_tickers_respects_rate_limit(self, mock_download):
         """Test that rate limiting is applied between multiple ticker fetches"""
         mock_data = pd.DataFrame({'Close': [100, 101, 102]})
@@ -266,7 +266,7 @@ class TestFetchMultipleTickers(unittest.TestCase):
 class TestGetStockInfo(unittest.TestCase):
     """Test get_stock_info method"""
     
-    @patch('src.data_fetcher.yf.Ticker')
+    @patch('src.data.fetcher.yf.Ticker')
     def test_get_stock_info_success(self, mock_ticker):
         """Test successful stock info retrieval"""
         mock_ticker_instance = MagicMock()
@@ -284,7 +284,7 @@ class TestGetStockInfo(unittest.TestCase):
         self.assertEqual(info['currentPrice'], 150.25)
         self.assertEqual(info['marketCap'], 3000000000000)
     
-    @patch('src.data_fetcher.yf.Ticker')
+    @patch('src.data.fetcher.yf.Ticker')
     def test_get_stock_info_missing_fields(self, mock_ticker):
         """Test stock info with missing fields"""
         mock_ticker_instance = MagicMock()
@@ -300,7 +300,7 @@ class TestGetStockInfo(unittest.TestCase):
         self.assertIn('currentPrice', info)
         self.assertNotIn('dividendYield', info)
     
-    @patch('src.data_fetcher.yf.Ticker')
+    @patch('src.data.fetcher.yf.Ticker')
     def test_get_stock_info_error(self, mock_ticker):
         """Test error handling in get_stock_info"""
         mock_ticker.side_effect = Exception("Stock not found")
@@ -556,7 +556,7 @@ class TestEdgeCases(unittest.TestCase):
 class TestIntegration(unittest.TestCase):
     """Integration tests combining multiple methods"""
     
-    @patch('src.data_fetcher.yf.download')
+    @patch('src.data.fetcher.yf.download')
     def test_workflow_fetch_and_calculate_returns(self, mock_download):
         """Test complete workflow: fetch data and calculate returns"""
         mock_data = pd.DataFrame({
@@ -571,7 +571,7 @@ class TestIntegration(unittest.TestCase):
         self.assertFalse(data.empty)
         self.assertIn('Close', data.columns)
     
-    @patch('src.data_fetcher.yf.download')
+    @patch('src.data.fetcher.yf.download')
     def test_workflow_fetch_multiple_and_correlate(self, mock_download):
         """Test workflow: fetch multiple tickers and calculate correlation"""
         mock_data = pd.DataFrame({
@@ -592,7 +592,7 @@ class TestIntegration(unittest.TestCase):
         correlation = combined.corr()
         self.assertEqual(correlation.shape, (2, 2))
     
-    @patch('src.data_fetcher.yf.download')
+    @patch('src.data.fetcher.yf.download')
     def test_workflow_with_cache_persistence(self, mock_download):
         """Test that cache persists across multiple operations"""
         mock_data = pd.DataFrame({

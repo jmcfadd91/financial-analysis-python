@@ -65,3 +65,9 @@ def get_logger(name: str, level: Optional[str] = None) -> logging.Logger:
         logger.setLevel(level.upper())
     
     return logger
+
+
+# Alias for backwards compatibility
+def setup_logger(name: str, level: Optional[str] = None) -> logging.Logger:
+    """Alias for get_logger."""
+    return get_logger(name, level)
