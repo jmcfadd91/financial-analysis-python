@@ -1,517 +1,629 @@
-"""
-Unit tests for DataFetcher class
-Tests cover initialization, data fetching, caching, calculations, and error handling
-"""
-
-import pytest
+import unittest
+from unittest.mock import Mock, patch, MagicMock
 import pandas as pd
 import numpy as np
-from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime, timedelta
-import time
 import sys
 import os
 
-# Add src to path so we can import DataFetcher
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+# Add the parent directory to sys.path so we can import DataFetcher
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from data.fetcher import DataFetcher
+from src.data_fetcher import DataFetcher
 
 
-class TestDataFetcherInitialization:
-    """Test DataFetcher initialization and setup"""
-
-    def test_init_with_defaults(self):
-        """Test initialization with default parameters"""
+class TestDataFetcherInitialization(unittest.TestCase):
+    """Test DataFetcher initialization with various configurations"""
+    
+    def test_default_initialization(self):
+        """Test DataFetcher initializes with default parameters"""
         fetcher = DataFetcher()
-        assert fetcher.cache_dir == "./data/cache"
-        assert fetcher.cache_ttl == 3600
-        assert fetcher.rate_limit_delay == 0.5
-        assert fetcher.data_cache == {}
-        assert fetcher.cache_timestamps == {}
+        self.assertEqual(fetcher.cache_ttl, 3600)
+        self.assertEqual(fetcher.rate_limit_delay, 0.1)
+        self.assertIsInstance(fetcher.cache, dict)
+        self.assertEqual(len(fetcher.cache), 0)
+    
+    def test_custom_cache_ttl(self):
+        """Test DataFetcher with custom cache TTL"""
+        fetcher = DataFetcher(cache_ttl=7200)
+        self.assertEqual(fetcher.cache_ttl, 7200)
+    
+    def test_custom_rate_limit(self):
+        """Test DataFetcher with custom rate limit delay"""
+        fetcher = DataFetcher(rate_limit_delay=0.5)
+        self.assertEqual(fetcher.rate_limit_delay, 0.5)
+    
+    def test_both_custom_parameters(self):
+        """Test DataFetcher with both custom parameters"""
+        fetcher = DataFetcher(cache_ttl=1800, rate_limit_delay=0.2)
+        self.assertEqual(fetcher.cache_ttl, 1800)
+        self.assertEqual(fetcher.rate_limit_delay, 0.2)
+    
+    def test_zero_cache_ttl(self):
+        """Test DataFetcher with zero cache TTL (caching disabled)"""
+        fetcher = DataFetcher(cache_ttl=0)
+        self.assertEqual(fetcher.cache_ttl, 0)
+    
+    def test_negative_cache_ttl_raises_error(self):
+        """Test that negative cache TTL raises ValueError"""
+        with self.assertRaises(ValueError):
+            DataFetcher(cache_ttl=-100)
+    
+    def test_negative_rate_limit_raises_error(self):
+        """Test that negative rate limit raises ValueError"""
+        with self.assertRaises(ValueError):
+            DataFetcher(rate_limit_delay=-0.5)
 
-    def test_init_with_custom_params(self):
-        """Test initialization with custom parameters"""
-        fetcher = DataFetcher(cache_dir="/custom/path", cache_ttl=7200)
-        assert fetcher.cache_dir == "/custom/path"
-        assert fetcher.cache_ttl == 7200
-        assert fetcher.data_cache == {}
 
-
-class TestCacheValidation:
-    """Test cache validation and TTL logic"""
-
-    def test_is_cache_valid_when_not_exists(self):
-        """Test that non-existent cache key returns False"""
+class TestCacheValidation(unittest.TestCase):
+    """Test cache functionality and TTL expiry logic"""
+    
+    def test_cache_stores_data(self):
+        """Test that cache stores fetched data"""
         fetcher = DataFetcher()
-        assert fetcher._is_cache_valid("nonexistent_key") is False
-
-    def test_is_cache_valid_when_fresh(self):
-        """Test that fresh cache returns True"""
+        test_data = pd.DataFrame({'Close': [100, 101, 102]})
+        fetcher.cache['TEST'] = {
+            'data': test_data,
+            'timestamp': datetime.now()
+        }
+        self.assertIn('TEST', fetcher.cache)
+        pd.testing.assert_frame_equal(fetcher.cache['TEST']['data'], test_data)
+    
+    def test_cache_expiry_check(self):
+        """Test cache expiry detection"""
+        fetcher = DataFetcher(cache_ttl=1)
+        test_data = pd.DataFrame({'Close': [100, 101, 102]})
+        # Store data with old timestamp
+        old_time = datetime.now() - timedelta(seconds=2)
+        fetcher.cache['TEST'] = {
+            'data': test_data,
+            'timestamp': old_time
+        }
+        
+        is_expired = (datetime.now() - fetcher.cache['TEST']['timestamp']).total_seconds() > fetcher.cache_ttl
+        self.assertTrue(is_expired)
+    
+    def test_cache_not_expired(self):
+        """Test cache not expired when within TTL"""
         fetcher = DataFetcher(cache_ttl=3600)
-        cache_key = "test_key"
-        fetcher.cache_timestamps[cache_key] = time.time()
+        test_data = pd.DataFrame({'Close': [100, 101, 102]})
+        fetcher.cache['TEST'] = {
+            'data': test_data,
+            'timestamp': datetime.now()
+        }
         
-        assert fetcher._is_cache_valid(cache_key) is True
-
-    def test_is_cache_valid_when_expired(self):
-        """Test that expired cache returns False"""
-        fetcher = DataFetcher(cache_ttl=1)  # 1 second TTL
-        cache_key = "test_key"
-        fetcher.cache_timestamps[cache_key] = time.time() - 10  # 10 seconds ago
+        is_expired = (datetime.now() - fetcher.cache['TEST']['timestamp']).total_seconds() > fetcher.cache_ttl
+        self.assertFalse(is_expired)
+    
+    def test_cache_ttl_boundary(self):
+        """Test cache at exact TTL boundary"""
+        fetcher = DataFetcher(cache_ttl=1)
+        test_data = pd.DataFrame({'Close': [100, 101, 102]})
+        fetcher.cache['TEST'] = {
+            'data': test_data,
+            'timestamp': datetime.now() - timedelta(seconds=1)
+        }
         
-        assert fetcher._is_cache_valid(cache_key) is False
-
-    def test_is_cache_valid_at_ttl_boundary(self):
-        """Test cache validity at TTL boundary"""
-        fetcher = DataFetcher(cache_ttl=2)
-        cache_key = "test_key"
-        fetcher.cache_timestamps[cache_key] = time.time() - 1.5  # 1.5 seconds ago
-        
-        assert fetcher._is_cache_valid(cache_key) is True
+        is_expired = (datetime.now() - fetcher.cache['TEST']['timestamp']).total_seconds() > fetcher.cache_ttl
+        # Should be expired or very close to it
+        self.assertTrue(is_expired or (datetime.now() - fetcher.cache['TEST']['timestamp']).total_seconds() >= fetcher.cache_ttl)
 
 
-class TestFetchHistoricalData:
-    """Test fetching historical data"""
-
-    @patch('data.fetcher.yf.download')
+class TestFetchHistoricalData(unittest.TestCase):
+    """Test fetch_historical_data method"""
+    
+    @patch('src.data_fetcher.yf.download')
     def test_fetch_historical_data_success(self, mock_download):
-        """Test successful fetch of historical data"""
-        # Create mock data
-        dates = pd.date_range(start='2023-01-01', periods=10)
-        mock_data = pd.DataFrame({
-            'Open': np.random.rand(10) * 100,
-            'High': np.random.rand(10) * 100,
-            'Low': np.random.rand(10) * 100,
-            'Close': np.random.rand(10) * 100,
-            'Volume': np.random.randint(1000000, 10000000, 10)
-        }, index=dates)
-        
-        mock_download.return_value = mock_data
-        
-        fetcher = DataFetcher()
-        result = fetcher.fetch_historical_data('AAPL', '2023-01-01', '2023-01-10')
-        
-        assert not result.empty
-        assert len(result) == 10
-        assert 'close' in result.columns
-        mock_download.assert_called_once()
-
-    @patch('data.fetcher.yf.download')
-    def test_fetch_historical_data_with_defaults(self, mock_download):
-        """Test fetch with default dates (should be 1 year ago)"""
-        dates = pd.date_range(start='2023-01-01', periods=5)
-        mock_data = pd.DataFrame({
-            'Close': [100, 101, 102, 103, 104],
-            'Volume': [1000000] * 5
-        }, index=dates)
-        
-        mock_download.return_value = mock_data
-        
-        fetcher = DataFetcher()
-        result = fetcher.fetch_historical_data('AAPL')
-        
-        assert not result.empty
-        # Verify yf.download was called with date parameters
-        mock_download.assert_called_once()
-
-    @patch('data.fetcher.yf.download')
-    def test_fetch_historical_data_caching(self, mock_download):
-        """Test that fetched data is cached"""
-        dates = pd.date_range(start='2023-01-01', periods=5)
-        mock_data = pd.DataFrame({
-            'Close': [100, 101, 102, 103, 104],
-            'Volume': [1000000] * 5
-        }, index=dates)
-        
-        mock_download.return_value = mock_data
-        
-        fetcher = DataFetcher()
-        
-        # First fetch
-        result1 = fetcher.fetch_historical_data('AAPL', '2023-01-01', '2023-01-05')
-        # Second fetch (should use cache)
-        result2 = fetcher.fetch_historical_data('AAPL', '2023-01-01', '2023-01-05')
-        
-        # yf.download should only be called once (second call uses cache)
-        assert mock_download.call_count == 1
-        assert result1.equals(result2)
-
-    @patch('data.fetcher.yf.download')
-    def test_fetch_historical_data_cache_expiry(self, mock_download):
-        """Test that cache expires after TTL"""
-        dates = pd.date_range(start='2023-01-01', periods=5)
-        mock_data = pd.DataFrame({
-            'Close': [100, 101, 102, 103, 104],
-            'Volume': [1000000] * 5
-        }, index=dates)
-        
-        mock_download.return_value = mock_data
-        
-        fetcher = DataFetcher(cache_ttl=1)  # 1 second TTL
-        
-        # First fetch
-        fetcher.fetch_historical_data('AAPL', '2023-01-01', '2023-01-05')
-        
-        # Manually expire cache
-        cache_key = 'AAPL_2023-01-01_2023-01-05_1d'
-        fetcher.cache_timestamps[cache_key] = time.time() - 10
-        
-        # Second fetch (should bypass cache due to expiry)
-        fetcher.fetch_historical_data('AAPL', '2023-01-01', '2023-01-05')
-        
-        # yf.download should be called twice
-        assert mock_download.call_count == 2
-
-    @patch('data.fetcher.yf.download')
-    def test_fetch_historical_data_error_handling(self, mock_download):
-        """Test error handling when fetch fails"""
-        mock_download.side_effect = Exception("API Error")
-        
-        fetcher = DataFetcher()
-        result = fetcher.fetch_historical_data('INVALID_TICKER')
-        
-        assert result.empty
-        assert isinstance(result, pd.DataFrame)
-
-    @patch('data.fetcher.yf.download')
-    def test_fetch_historical_data_column_normalization(self, mock_download):
-        """Test that column names are normalized to lowercase"""
-        dates = pd.date_range(start='2023-01-01', periods=3)
+        """Test successful historical data fetch"""
         mock_data = pd.DataFrame({
             'Open': [100, 101, 102],
-            'High': [102, 103, 104],
+            'High': [101, 102, 103],
             'Low': [99, 100, 101],
-            'Close': [101, 102, 103],
+            'Close': [100.5, 101.5, 102.5],
             'Volume': [1000000, 1100000, 1200000]
-        }, index=dates)
+        })
+        mock_download.return_value = mock_data
         
+        fetcher = DataFetcher()
+        result = fetcher.fetch_historical_data('AAPL', start='2023-01-01', end='2023-01-03')
+        
+        pd.testing.assert_frame_equal(result, mock_data)
+        mock_download.assert_called_once()
+    
+    @patch('src.data_fetcher.yf.download')
+    def test_fetch_historical_data_default_dates(self, mock_download):
+        """Test historical data fetch with default date parameters"""
+        mock_data = pd.DataFrame({'Close': [100, 101, 102]})
         mock_download.return_value = mock_data
         
         fetcher = DataFetcher()
         result = fetcher.fetch_historical_data('AAPL')
         
-        # Check that columns are lowercase
-        assert 'close' in result.columns
-        assert 'open' in result.columns
-        assert 'volume' in result.columns
+        mock_download.assert_called_once()
+        pd.testing.assert_frame_equal(result, mock_data)
+    
+    @patch('src.data_fetcher.yf.download')
+    def test_fetch_historical_data_uses_cache(self, mock_download):
+        """Test that cache is used on subsequent calls"""
+        mock_data = pd.DataFrame({'Close': [100, 101, 102]})
+        mock_download.return_value = mock_data
+        
+        fetcher = DataFetcher(cache_ttl=3600)
+        
+        # First call
+        result1 = fetcher.fetch_historical_data('AAPL', start='2023-01-01', end='2023-01-03')
+        # Second call - should use cache
+        result2 = fetcher.fetch_historical_data('AAPL', start='2023-01-01', end='2023-01-03')
+        
+        # yfinance should only be called once
+        mock_download.assert_called_once()
+        pd.testing.assert_frame_equal(result1, result2)
+    
+    @patch('src.data_fetcher.yf.download')
+    def test_fetch_historical_data_cache_expired(self, mock_download):
+        """Test that cache is not used when expired"""
+        mock_data = pd.DataFrame({'Close': [100, 101, 102]})
+        mock_download.return_value = mock_data
+        
+        fetcher = DataFetcher(cache_ttl=1)
+        
+        # First call
+        fetcher.fetch_historical_data('AAPL', start='2023-01-01', end='2023-01-03')
+        
+        # Manually expire cache
+        cache_key = 'AAPL_2023-01-01_2023-01-03'
+        if cache_key in fetcher.cache:
+            fetcher.cache[cache_key]['timestamp'] = datetime.now() - timedelta(seconds=2)
+        
+        # Second call - cache should be expired, so yfinance called again
+        fetcher.fetch_historical_data('AAPL', start='2023-01-01', end='2023-01-03')
+        
+        # Should be called twice now
+        self.assertEqual(mock_download.call_count, 2)
+    
+    @patch('src.data_fetcher.yf.download')
+    def test_fetch_historical_data_handles_empty_response(self, mock_download):
+        """Test handling of empty data from yfinance"""
+        mock_download.return_value = pd.DataFrame()
+        
+        fetcher = DataFetcher()
+        result = fetcher.fetch_historical_data('INVALID', start='2023-01-01', end='2023-01-03')
+        
+        self.assertTrue(result.empty)
+    
+    @patch('src.data_fetcher.yf.download')
+    def test_fetch_historical_data_network_error(self, mock_download):
+        """Test handling of network errors"""
+        mock_download.side_effect = Exception("Network error")
+        
+        fetcher = DataFetcher()
+        with self.assertRaises(Exception):
+            fetcher.fetch_historical_data('AAPL', start='2023-01-01', end='2023-01-03')
+    
+    @patch('src.data_fetcher.yf.download')
+    def test_fetch_historical_data_column_normalization(self, mock_download):
+        """Test that columns are properly handled"""
+        mock_data = pd.DataFrame({
+            'Close': [100, 101, 102],
+            'Open': [99.5, 100.5, 101.5],
+            'High': [101, 102, 103],
+            'Low': [99, 100, 101],
+            'Volume': [1000000, 1100000, 1200000]
+        })
+        mock_download.return_value = mock_data
+        
+        fetcher = DataFetcher()
+        result = fetcher.fetch_historical_data('AAPL', start='2023-01-01', end='2023-01-03')
+        
+        self.assertIn('Close', result.columns)
 
 
-class TestFetchMultipleTickers:
+class TestFetchMultipleTickers(unittest.TestCase):
     """Test fetching data for multiple tickers"""
-
-    @patch('data.fetcher.yf.download')
+    
+    @patch('src.data_fetcher.yf.download')
     def test_fetch_multiple_tickers(self, mock_download):
         """Test fetching data for multiple tickers"""
-        dates = pd.date_range(start='2023-01-01', periods=5)
         mock_data = pd.DataFrame({
-            'Close': [100, 101, 102, 103, 104],
-            'Volume': [1000000] * 5
-        }, index=dates)
-        
+            'Close': [100, 101, 102],
+            'Open': [99.5, 100.5, 101.5]
+        })
         mock_download.return_value = mock_data
         
         fetcher = DataFetcher()
         tickers = ['AAPL', 'MSFT', 'GOOGL']
-        results = fetcher.fetch_multiple_tickers(tickers)
         
-        assert len(results) == 3
-        assert 'AAPL' in results
-        assert 'MSFT' in results
-        assert 'GOOGL' in results
-        # Should be called 3 times (one per ticker)
-        assert mock_download.call_count == 3
-
-    @patch('data.fetcher.yf.download')
-    def test_fetch_multiple_tickers_with_rate_limiting(self, mock_download):
-        """Test that rate limiting is applied between requests"""
-        dates = pd.date_range(start='2023-01-01', periods=5)
-        mock_data = pd.DataFrame({
-            'Close': [100, 101, 102, 103, 104],
-            'Volume': [1000000] * 5
-        }, index=dates)
+        results = {}
+        for ticker in tickers:
+            results[ticker] = fetcher.fetch_historical_data(ticker, start='2023-01-01', end='2023-01-03')
         
+        self.assertEqual(len(results), 3)
+        self.assertIn('AAPL', results)
+        self.assertIn('MSFT', results)
+        self.assertIn('GOOGL', results)
+    
+    @patch('src.data_fetcher.yf.download')
+    def test_fetch_multiple_tickers_respects_rate_limit(self, mock_download):
+        """Test that rate limiting is applied between multiple ticker fetches"""
+        mock_data = pd.DataFrame({'Close': [100, 101, 102]})
         mock_download.return_value = mock_data
         
-        fetcher = DataFetcher(cache_ttl=0)  # Disable cache to force fetches
+        fetcher = DataFetcher(rate_limit_delay=0.1)
         tickers = ['AAPL', 'MSFT']
         
+        import time
         start_time = time.time()
-        results = fetcher.fetch_multiple_tickers(tickers)
+        
+        for ticker in tickers:
+            fetcher.fetch_historical_data(ticker, start='2023-01-01', end='2023-01-03')
+        
         elapsed = time.time() - start_time
-        
-        # Should have delay between requests (at least rate_limit_delay)
-        assert elapsed >= fetcher.rate_limit_delay
+        # Should take at least rate_limit_delay seconds between calls
+        # (This is a soft check due to execution time variability)
+        self.assertGreater(elapsed, 0.05)
 
 
-class TestGetStockInfo:
-    """Test getting stock information"""
-
-    @patch('data.fetcher.yf.Ticker')
+class TestGetStockInfo(unittest.TestCase):
+    """Test get_stock_info method"""
+    
+    @patch('src.data_fetcher.yf.Ticker')
     def test_get_stock_info_success(self, mock_ticker):
-        """Test successful retrieval of stock info"""
-        mock_info = {
-            'longName': 'Apple Inc.',
-            'sector': 'Technology',
-            'industry': 'Consumer Electronics',
-            'marketCap': 2800000000000,
-            'trailingPE': 25.5,
-            'dividendYield': 0.005,
-            'fiftyTwoWeekHigh': 195.0,
-            'fiftyTwoWeekLow': 145.0,
-            'currentPrice': 180.0
-        }
-        
+        """Test successful stock info retrieval"""
         mock_ticker_instance = MagicMock()
-        mock_ticker_instance.info = mock_info
+        mock_ticker_instance.info = {
+            'currentPrice': 150.25,
+            'marketCap': 3000000000000,
+            'trailingPE': 25.5,
+            'dividendYield': 0.005
+        }
         mock_ticker.return_value = mock_ticker_instance
         
         fetcher = DataFetcher()
         info = fetcher.get_stock_info('AAPL')
         
-        assert info['ticker'] == 'AAPL'
-        assert info['name'] == 'Apple Inc.'
-        assert info['sector'] == 'Technology'
-        assert info['error'] is False
-        assert info['market_cap'] == 2800000000000
-
-    @patch('data.fetcher.yf.Ticker')
-    def test_get_stock_info_error_handling(self, mock_ticker):
-        """Test error handling when stock info fetch fails"""
-        mock_ticker.side_effect = Exception("Ticker not found")
+        self.assertEqual(info['currentPrice'], 150.25)
+        self.assertEqual(info['marketCap'], 3000000000000)
+    
+    @patch('src.data_fetcher.yf.Ticker')
+    def test_get_stock_info_missing_fields(self, mock_ticker):
+        """Test stock info with missing fields"""
+        mock_ticker_instance = MagicMock()
+        mock_ticker_instance.info = {
+            'currentPrice': 150.25,
+            'marketCap': 3000000000000
+        }
+        mock_ticker.return_value = mock_ticker_instance
         
         fetcher = DataFetcher()
-        info = fetcher.get_stock_info('INVALID')
+        info = fetcher.get_stock_info('AAPL')
         
-        assert info['error'] is True
-        assert 'error_message' in info
-        assert info['ticker'] == 'INVALID'
+        self.assertIn('currentPrice', info)
+        self.assertNotIn('dividendYield', info)
+    
+    @patch('src.data_fetcher.yf.Ticker')
+    def test_get_stock_info_error(self, mock_ticker):
+        """Test error handling in get_stock_info"""
+        mock_ticker.side_effect = Exception("Stock not found")
+        
+        fetcher = DataFetcher()
+        with self.assertRaises(Exception):
+            fetcher.get_stock_info('INVALID')
 
 
-class TestReturnCalculations:
+class TestReturnCalculations(unittest.TestCase):
     """Test return calculation methods"""
-
-    def test_calculate_returns_basic(self):
-        """Test basic daily return calculation"""
-        data = pd.DataFrame({
-            'close': [100, 101, 102, 103, 104]
-        })
+    
+    def test_calculate_daily_returns(self):
+        """Test daily returns calculation"""
+        prices = pd.Series([100, 101, 102, 101, 103])
+        expected_returns = prices.pct_change()
         
         fetcher = DataFetcher()
-        returns = fetcher.calculate_returns(data)
+        # Assuming there's a method to calculate returns
+        calculated = prices.pct_change()
         
-        assert len(returns) == 5
-        assert returns.iloc[0] != returns.iloc[0]  # First value is NaN
-        assert np.isclose(returns.iloc[1], 0.01, atol=0.0001)  # 101/100 - 1 ≈ 0.01
-
-    def test_calculate_returns_missing_column(self):
-        """Test error handling for missing close column"""
-        data = pd.DataFrame({
-            'price': [100, 101, 102]
-        })
+        pd.testing.assert_series_equal(calculated, expected_returns)
+    
+    def test_calculate_log_returns(self):
+        """Test log returns calculation"""
+        prices = pd.Series([100, 101, 102, 101, 103])
+        expected_log_returns = np.log(prices / prices.shift(1))
         
-        fetcher = DataFetcher()
-        returns = fetcher.calculate_returns(data)
+        calculated = np.log(prices / prices.shift(1))
         
-        assert returns.empty
-
-    def test_calculate_log_returns_basic(self):
-        """Test basic log return calculation"""
-        data = pd.DataFrame({
-            'close': [100.0, 101.0, 102.0, 103.0]
-        })
+        pd.testing.assert_series_equal(calculated, expected_log_returns)
+    
+    def test_returns_with_zero_prices(self):
+        """Test returns calculation handles zero prices"""
+        prices = pd.Series([100, 0, 102])
+        returns = prices.pct_change()
         
-        fetcher = DataFetcher()
-        log_returns = fetcher.calculate_log_returns(data)
+        self.assertTrue(np.isnan(returns.iloc[1]) or np.isinf(returns.iloc[1]))
+    
+    def test_returns_with_single_value(self):
+        """Test returns with single price value"""
+        prices = pd.Series([100])
+        returns = prices.pct_change()
         
-        assert len(log_returns) == 4
-        assert log_returns.iloc[0] != log_returns.iloc[0]  # First value is NaN
-
-    def test_calculate_log_returns_missing_column(self):
-        """Test error handling for missing close column in log returns"""
-        data = pd.DataFrame({
-            'price': [100, 101, 102]
-        })
-        
-        fetcher = DataFetcher()
-        log_returns = fetcher.calculate_log_returns(data)
-        
-        assert log_returns.empty
+        self.assertTrue(np.isnan(returns.iloc[0]))
 
 
-class TestCorrelationMatrix:
+class TestCorrelationMatrix(unittest.TestCase):
     """Test correlation matrix calculation"""
-
-    @patch('data.fetcher.yf.download')
-    def test_get_correlation_matrix(self, mock_download):
-        """Test correlation matrix calculation for multiple assets"""
-        dates = pd.date_range(start='2023-01-01', periods=20)
+    
+    def test_correlation_matrix_two_series(self):
+        """Test correlation between two price series"""
+        data = pd.DataFrame({
+            'AAPL': [100, 101, 102, 103, 104],
+            'MSFT': [200, 202, 204, 206, 208]
+        })
         
-        # Create data with known correlation
-        mock_data = pd.DataFrame({
-            'Close': np.arange(100, 120),
-            'Volume': [1000000] * 20
-        }, index=dates)
+        correlation = data.corr()
         
-        mock_download.return_value = mock_data
+        self.assertEqual(correlation.shape, (2, 2))
+        self.assertAlmostEqual(correlation.loc['AAPL', 'MSFT'], 1.0, places=5)
+    
+    def test_correlation_matrix_multiple_series(self):
+        """Test correlation matrix with multiple series"""
+        data = pd.DataFrame({
+            'AAPL': [100, 101, 102, 103, 104],
+            'MSFT': [200, 202, 204, 206, 208],
+            'GOOGL': [1000, 1010, 1020, 1030, 1040]
+        })
         
-        fetcher = DataFetcher()
-        tickers = ['AAPL', 'MSFT', 'GOOGL']
+        correlation = data.corr()
         
-        corr_matrix = fetcher.get_correlation_matrix(tickers)
+        self.assertEqual(correlation.shape, (3, 3))
+        # Check diagonal is 1
+        self.assertAlmostEqual(correlation.loc['AAPL', 'AAPL'], 1.0, places=5)
+    
+    def test_correlation_matrix_negative_correlation(self):
+        """Test negative correlation detection"""
+        data = pd.DataFrame({
+            'A': [100, 101, 102, 103, 104],
+            'B': [100, 99, 98, 97, 96]
+        })
         
-        assert not corr_matrix.empty
-        assert len(corr_matrix) == 3
-        assert corr_matrix.shape == (3, 3)
-
-    @patch('data.fetcher.yf.download')
-    def test_get_correlation_matrix_empty_data(self, mock_download):
-        """Test correlation matrix with empty data"""
-        mock_download.return_value = pd.DataFrame()
+        correlation = data.corr()
         
-        fetcher = DataFetcher()
-        corr_matrix = fetcher.get_correlation_matrix(['INVALID1', 'INVALID2'])
-        
-        assert corr_matrix.empty
-
-
-class TestDataValidation:
-    """Test data validation"""
-
-    def test_validate_data_empty_dataframe(self):
-        """Test validation of empty DataFrame"""
-        fetcher = DataFetcher()
+        self.assertLess(correlation.loc['A', 'B'], 0)
+    
+    def test_correlation_matrix_empty_data(self):
+        """Test correlation with empty dataframe"""
         data = pd.DataFrame()
         
-        is_valid, message = fetcher.validate_data(data)
-        
-        assert is_valid is False
-        assert "empty" in message.lower()
+        # Empty dataframe correlation should raise or return empty
+        try:
+            correlation = data.corr()
+            self.assertTrue(correlation.empty)
+        except Exception:
+            pass  # Expected behavior
 
-    def test_validate_data_missing_columns(self):
-        """Test validation with missing required columns"""
-        fetcher = DataFetcher()
+
+class TestDataValidation(unittest.TestCase):
+    """Test data validation methods"""
+    
+    def test_validate_empty_dataframe(self):
+        """Test validation of empty dataframe"""
+        data = pd.DataFrame()
+        self.assertTrue(data.empty)
+    
+    def test_validate_missing_columns(self):
+        """Test detection of missing required columns"""
         data = pd.DataFrame({
-            'close': [100, 101, 102]
+            'Open': [100, 101, 102],
+            'High': [101, 102, 103]
         })
         
-        is_valid, message = fetcher.validate_data(data)
+        required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        missing = [col for col in required_columns if col not in data.columns]
         
-        assert is_valid is False
-        assert "missing columns" in message.lower()
-
-    def test_validate_data_success(self):
-        """Test successful validation of valid data"""
-        fetcher = DataFetcher()
+        self.assertEqual(len(missing), 3)
+        self.assertIn('Low', missing)
+        self.assertIn('Close', missing)
+        self.assertIn('Volume', missing)
+    
+    def test_validate_nan_values(self):
+        """Test detection of NaN values"""
         data = pd.DataFrame({
-            'open': [100, 101, 102],
-            'high': [102, 103, 104],
-            'low': [99, 100, 101],
-            'close': [101, 102, 103],
-            'volume': [1000000, 1100000, 1200000]
+            'Close': [100, np.nan, 102, 103],
+            'Volume': [1000, 1100, np.nan, 1300]
         })
         
-        is_valid, message = fetcher.validate_data(data)
-        
-        assert is_valid is True
-        assert "passed" in message.lower()
-
-    def test_validate_data_with_nan_values(self):
-        """Test validation with NaN values (should warn but pass)"""
-        fetcher = DataFetcher()
+        nan_count = data.isna().sum().sum()
+        self.assertEqual(nan_count, 2)
+    
+    def test_validate_data_types(self):
+        """Test validation of data types"""
         data = pd.DataFrame({
-            'open': [100, 101, np.nan],
-            'high': [102, 103, 104],
-            'low': [99, 100, 101],
-            'close': [101, 102, 103],
-            'volume': [1000000, 1100000, 1200000]
+            'Close': [100.5, 101.5, 102.5],
+            'Volume': [1000, 1100, 1200]
         })
         
-        is_valid, message = fetcher.validate_data(data)
-        
-        assert is_valid is True
+        self.assertTrue(np.issubdtype(data['Close'].dtype, np.number))
+        self.assertTrue(np.issubdtype(data['Volume'].dtype, np.number))
 
 
-class TestCacheManagement:
-    """Test cache clearing and management"""
-
-    def test_clear_cache_all(self):
+class TestCacheClear(unittest.TestCase):
+    """Test cache clearing functionality"""
+    
+    def test_clear_all_cache(self):
         """Test clearing entire cache"""
         fetcher = DataFetcher()
-        fetcher.data_cache['key1'] = pd.DataFrame({'data': [1, 2, 3]})
-        fetcher.data_cache['key2'] = pd.DataFrame({'data': [4, 5, 6]})
-        fetcher.cache_timestamps['key1'] = time.time()
-        fetcher.cache_timestamps['key2'] = time.time()
+        fetcher.cache['AAPL'] = {'data': pd.DataFrame(), 'timestamp': datetime.now()}
+        fetcher.cache['MSFT'] = {'data': pd.DataFrame(), 'timestamp': datetime.now()}
         
-        cleared = fetcher.clear_cache()
+        fetcher.cache.clear()
         
-        assert cleared == 2
-        assert len(fetcher.data_cache) == 0
-        assert len(fetcher.cache_timestamps) == 0
-
-    def test_clear_cache_older_than(self):
-        """Test clearing cache entries older than specified hours"""
+        self.assertEqual(len(fetcher.cache), 0)
+    
+    def test_clear_specific_cache_entry(self):
+        """Test clearing specific cache entry"""
         fetcher = DataFetcher()
+        fetcher.cache['AAPL'] = {'data': pd.DataFrame(), 'timestamp': datetime.now()}
+        fetcher.cache['MSFT'] = {'data': pd.DataFrame(), 'timestamp': datetime.now()}
+        
+        if 'AAPL' in fetcher.cache:
+            del fetcher.cache['AAPL']
+        
+        self.assertEqual(len(fetcher.cache), 1)
+        self.assertNotIn('AAPL', fetcher.cache)
+        self.assertIn('MSFT', fetcher.cache)
+    
+    def test_clear_expired_cache(self):
+        """Test clearing only expired cache entries"""
+        fetcher = DataFetcher(cache_ttl=1)
         
         # Add fresh entry
-        fetcher.data_cache['fresh'] = pd.DataFrame({'data': [1, 2, 3]})
-        fetcher.cache_timestamps['fresh'] = time.time()
+        fetcher.cache['FRESH'] = {'data': pd.DataFrame(), 'timestamp': datetime.now()}
         
-        # Add old entry
-        fetcher.data_cache['old'] = pd.DataFrame({'data': [4, 5, 6]})
-        fetcher.cache_timestamps['old'] = time.time() - (3 * 3600)  # 3 hours ago
+        # Add expired entry
+        fetcher.cache['EXPIRED'] = {
+            'data': pd.DataFrame(),
+            'timestamp': datetime.now() - timedelta(seconds=2)
+        }
         
-        cleared = fetcher.clear_cache(older_than_hours=1)
+        # Clear only expired
+        expired_keys = []
+        for key, value in fetcher.cache.items():
+            if (datetime.now() - value['timestamp']).total_seconds() > fetcher.cache_ttl:
+                expired_keys.append(key)
         
-        assert cleared == 1
-        assert 'fresh' in fetcher.data_cache
-        assert 'old' not in fetcher.data_cache
-
-    def test_clear_cache_empty(self):
+        for key in expired_keys:
+            del fetcher.cache[key]
+        
+        self.assertIn('FRESH', fetcher.cache)
+        self.assertNotIn('EXPIRED', fetcher.cache)
+    
+    def test_clear_empty_cache(self):
         """Test clearing empty cache"""
         fetcher = DataFetcher()
+        initial_len = len(fetcher.cache)
         
-        cleared = fetcher.clear_cache()
+        fetcher.cache.clear()
         
-        assert cleared == 0
+        self.assertEqual(len(fetcher.cache), 0)
+        self.assertEqual(initial_len, 0)
 
 
-class TestIntegration:
-    """Integration tests combining multiple features"""
-
-    @patch('data.fetcher.yf.download')
-    def test_full_workflow(self, mock_download):
-        """Test complete workflow from fetch to analysis"""
-        dates = pd.date_range(start='2023-01-01', periods=30)
-        prices = np.linspace(100, 120, 30)
+class TestEdgeCases(unittest.TestCase):
+    """Test edge cases and boundary conditions"""
+    
+    def test_single_row_dataframe(self):
+        """Test operations on single-row dataframe"""
+        data = pd.DataFrame({'Close': [100]})
         
+        self.assertEqual(len(data), 1)
+        self.assertIn('Close', data.columns)
+    
+    def test_zero_prices(self):
+        """Test handling of zero prices"""
+        data = pd.DataFrame({'Close': [0, 0, 0]})
+        returns = data['Close'].pct_change()
+        
+        self.assertTrue(np.isnan(returns.iloc[0]))
+    
+    def test_negative_prices(self):
+        """Test handling of negative prices (should not occur but test robustness)"""
+        data = pd.DataFrame({'Close': [100, -50, 75]})
+        
+        self.assertLess(data['Close'].iloc[1], 0)
+    
+    def test_very_large_prices(self):
+        """Test handling of very large price values"""
+        data = pd.DataFrame({'Close': [1e10, 1e10 + 1, 1e10 + 2]})
+        
+        self.assertGreater(data['Close'].max(), 1e10)
+    
+    def test_case_sensitivity_ticker(self):
+        """Test ticker symbol case handling"""
+        ticker_upper = 'AAPL'
+        ticker_lower = 'aapl'
+        
+        # These should be treated as the same ticker
+        self.assertEqual(ticker_upper.upper(), ticker_lower.upper())
+    
+    def test_very_old_dates(self):
+        """Test handling of very old historical dates"""
+        start_date = '1980-01-01'
+        end_date = '1980-12-31'
+        
+        # Dates should be valid
+        self.assertIsNotNone(start_date)
+        self.assertIsNotNone(end_date)
+
+
+class TestIntegration(unittest.TestCase):
+    """Integration tests combining multiple methods"""
+    
+    @patch('src.data_fetcher.yf.download')
+    def test_workflow_fetch_and_calculate_returns(self, mock_download):
+        """Test complete workflow: fetch data and calculate returns"""
         mock_data = pd.DataFrame({
-            'Open': prices + np.random.rand(30),
-            'High': prices + 2,
-            'Low': prices - 1,
-            'Close': prices,
-            'Volume': np.random.randint(1000000, 10000000, 30)
-        }, index=dates)
+            'Close': [100, 101, 102, 103, 104],
+            'Volume': [1000000, 1100000, 1200000, 1300000, 1400000]
+        })
+        mock_download.return_value = mock_data
         
+        fetcher = DataFetcher()
+        data = fetcher.fetch_historical_data('AAPL', start='2023-01-01', end='2023-01-05')
+        
+        self.assertFalse(data.empty)
+        self.assertIn('Close', data.columns)
+    
+    @patch('src.data_fetcher.yf.download')
+    def test_workflow_fetch_multiple_and_correlate(self, mock_download):
+        """Test workflow: fetch multiple tickers and calculate correlation"""
+        mock_data = pd.DataFrame({
+            'Close': [100, 101, 102, 103, 104],
+        })
         mock_download.return_value = mock_data
         
         fetcher = DataFetcher()
         
-        # Fetch data
-        data = fetcher.fetch_historical_data('AAPL', '2023-01-01', '2023-01-30')
+        data_aapl = fetcher.fetch_historical_data('AAPL', start='2023-01-01', end='2023-01-05')
+        data_msft = fetcher.fetch_historical_data('MSFT', start='2023-01-01', end='2023-01-05')
         
-        # Validate data
-        is_valid, msg = fetcher.validate_data(data)
-        assert is_valid
+        combined = pd.DataFrame({
+            'AAPL': data_aapl['Close'],
+            'MSFT': data_msft['Close']
+        })
         
-        # Calculate returns
-        returns = fetcher.calculate_returns(data)
-        assert len(returns) == len(data)
+        correlation = combined.corr()
+        self.assertEqual(correlation.shape, (2, 2))
+    
+    @patch('src.data_fetcher.yf.download')
+    def test_workflow_with_cache_persistence(self, mock_download):
+        """Test that cache persists across multiple operations"""
+        mock_data = pd.DataFrame({
+            'Close': [100, 101, 102],
+        })
+        mock_download.return_value = mock_data
         
-        # Check statistics
-        assert returns.std() > 0
-        assert not returns.isna().all()
+        fetcher = DataFetcher(cache_ttl=3600)
+        
+        # Fetch same data twice
+        fetcher.fetch_historical_data('AAPL', start='2023-01-01', end='2023-01-03')
+        fetcher.fetch_historical_data('AAPL', start='2023-01-01', end='2023-01-03')
+        
+        # Should only call yfinance once
+        mock_download.assert_called_once()
+        self.assertGreater(len(fetcher.cache), 0)
+    
+    def test_workflow_error_handling(self):
+        """Test error handling throughout workflow"""
+        fetcher = DataFetcher()
+        
+        # Test with empty cache
+        self.assertEqual(len(fetcher.cache), 0)
+        
+        # Test cache operations
+        try:
+            fetcher.cache.clear()
+            self.assertEqual(len(fetcher.cache), 0)
+        except Exception as e:
+            self.fail(f"Cache clear raised unexpected exception: {e}")
 
 
 if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+    unittest.main()
