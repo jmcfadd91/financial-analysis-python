@@ -25,226 +25,199 @@ class DataFetcher:
     Supports multiple timeframes and data sources
     """
 
-    def __init__(self, cache_dir: str = "./data/cache", cache_ttl: int = 3600):
+    def __init__(self, cache_ttl: int = 3600, rate_limit_delay: float = 0.1):
         """
         Initialize DataFetcher
-        
+
         Args:
-            cache_dir: Directory to cache downloaded data
             cache_ttl: Cache time-to-live in seconds (default: 1 hour)
+            rate_limit_delay: Delay between API calls in seconds (default: 0.1)
         """
-        self.cache_dir = cache_dir
-        self.data_cache = {}
-        self.cache_timestamps = {}  # Track cache entry timestamps
+        if cache_ttl < 0:
+            raise ValueError("cache_ttl must be non-negative")
+        if rate_limit_delay < 0:
+            raise ValueError("rate_limit_delay must be non-negative")
+
+        self.cache = {}
         self.cache_ttl = cache_ttl
-        self.rate_limit_delay = 0.5  # 500ms delay between API calls
+        self.rate_limit_delay = rate_limit_delay
 
     def _is_cache_valid(self, cache_key: str) -> bool:
         """
         Check if cache entry is still valid based on TTL
-        
+
         Args:
             cache_key: Cache key to check
-        
+
         Returns:
             True if cache is valid, False if expired
         """
-        if cache_key not in self.cache_timestamps:
+        if cache_key not in self.cache:
             return False
-        
-        elapsed = time.time() - self.cache_timestamps[cache_key]
+
+        elapsed = (datetime.now() - self.cache[cache_key]['timestamp']).total_seconds()
         return elapsed < self.cache_ttl
 
     def fetch_historical_data(
         self,
         ticker: str,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
         interval: str = "1d"
     ) -> pd.DataFrame:
         """
         Fetch historical OHLCV data for a single asset
-        
+
         Args:
             ticker: Asset ticker (e.g., 'AAPL', 'BTC-USD')
-            start_date: Start date (YYYY-MM-DD), default: 1 year ago
-            end_date: End date (YYYY-MM-DD), default: today
+            start: Start date (YYYY-MM-DD), default: 1 year ago
+            end: End date (YYYY-MM-DD), default: today
             interval: '1d', '1wk', '1mo', '1h', '5m', etc.
-        
+
         Returns:
             DataFrame with OHLCV data
         """
-        if start_date is None:
-            start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
-        if end_date is None:
-            end_date = datetime.now().strftime("%Y-%m-%d")
+        if start is None:
+            start = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+        if end is None:
+            end = datetime.now().strftime("%Y-%m-%d")
 
-        cache_key = f"{ticker}_{start_date}_{end_date}_{interval}"
+        cache_key = f"{ticker}_{start}_{end}"
 
         # Check cache with TTL validation
-        if cache_key in self.data_cache and self._is_cache_valid(cache_key):
+        if cache_key in self.cache and self._is_cache_valid(cache_key):
             logger.info(f"Loading {ticker} from cache (valid)")
-            return self.data_cache[cache_key]
+            return self.cache[cache_key]['data']
 
-        try:
-            logger.info(f"Fetching {ticker} from {start_date} to {end_date}")
-            data = yf.download(
-                ticker,
-                start=start_date,
-                end=end_date,
-                interval=interval,
-                progress=False
-            )
+        logger.info(f"Fetching {ticker} from {start} to {end}")
+        data = yf.download(
+            ticker,
+            start=start,
+            end=end,
+            interval=interval,
+            progress=False
+        )
 
-            # Ensure proper column names
-            data.columns = [col.lower() for col in data.columns]
+        # Cache the data with timestamp
+        self.cache[cache_key] = {'data': data, 'timestamp': datetime.now()}
 
-            # Cache the data with timestamp
-            self.data_cache[cache_key] = data
-            self.cache_timestamps[cache_key] = time.time()
+        logger.info(f"Successfully fetched {len(data)} records for {ticker}")
 
-            logger.info(f"✓ Successfully fetched {len(data)} records for {ticker}")
-            
-            # Rate limiting - prevent API throttling
-            time.sleep(self.rate_limit_delay)
-            
-            return data
+        # Rate limiting - prevent API throttling
+        time.sleep(self.rate_limit_delay)
 
-        except Exception as e:
-            logger.error(f"Error fetching {ticker}: {str(e)}")
-            return pd.DataFrame()
+        return data
 
     def fetch_multiple_tickers(
         self,
         tickers: List[str],
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
         interval: str = "1d"
     ) -> Dict[str, pd.DataFrame]:
         """
         Fetch data for multiple tickers with rate limiting
-        
+
         Args:
             tickers: List of ticker symbols
-            start_date: Start date (YYYY-MM-DD)
-            end_date: End date (YYYY-MM-DD)
+            start: Start date (YYYY-MM-DD)
+            end: End date (YYYY-MM-DD)
             interval: Time interval
-        
+
         Returns:
             Dictionary with ticker as key, DataFrame as value
         """
         results = {}
         for i, ticker in enumerate(tickers):
             results[ticker] = self.fetch_historical_data(
-                ticker, start_date, end_date, interval
+                ticker, start, end, interval
             )
             # Add delay between requests (except for cached data)
             if i < len(tickers) - 1:
                 time.sleep(self.rate_limit_delay)
-        
+
         return results
 
     def get_stock_info(self, ticker: str) -> Dict:
         """
         Get company info and current metrics
-        
+
         Args:
             ticker: Stock ticker
-        
-        Returns:
-            Dictionary with company info
-        """
-        try:
-            ticker_obj = yf.Ticker(ticker)
-            info = ticker_obj.info
 
-            return {
-                "ticker": ticker,
-                "name": info.get("longName", "N/A"),
-                "sector": info.get("sector", "N/A"),
-                "industry": info.get("industry", "N/A"),
-                "market_cap": info.get("marketCap", "N/A"),
-                "pe_ratio": info.get("trailingPE", "N/A"),
-                "dividend_yield": info.get("dividendYield", "N/A"),
-                "52_week_high": info.get("fiftyTwoWeekHigh", "N/A"),
-                "52_week_low": info.get("fiftyTwoWeekLow", "N/A"),
-                "current_price": info.get("currentPrice", "N/A"),
-                "error": False
-            }
-        except Exception as e:
-            logger.error(f"Error fetching info for {ticker}: {str(e)}")
-            return {
-                "ticker": ticker,
-                "error": True,
-                "error_message": str(e)
-            }
+        Returns:
+            Dictionary with company info from yfinance
+        """
+        ticker_obj = yf.Ticker(ticker)
+        return ticker_obj.info
 
     def calculate_returns(self, data: pd.DataFrame) -> pd.Series:
         """
         Calculate daily returns from OHLCV data
-        
+
         Args:
-            data: DataFrame with 'close' column
-        
+            data: DataFrame with 'close' or 'Close' column
+
         Returns:
             Series of daily returns
         """
-        if "close" not in data.columns:
-            logger.error("DataFrame must contain 'close' column")
+        close_col = 'close' if 'close' in data.columns else 'Close'
+        if close_col not in data.columns:
+            logger.error("DataFrame must contain 'close' or 'Close' column")
             return pd.Series()
 
-        returns = data["close"].pct_change()
-        return returns
+        return data[close_col].pct_change()
 
     def calculate_log_returns(self, data: pd.DataFrame) -> pd.Series:
         """
         Calculate log returns from OHLCV data
-        
+
         Args:
-            data: DataFrame with 'close' column
-        
+            data: DataFrame with 'close' or 'Close' column
+
         Returns:
             Series of log returns
         """
-        if "close" not in data.columns:
-            logger.error("DataFrame must contain 'close' column")
+        close_col = 'close' if 'close' in data.columns else 'Close'
+        if close_col not in data.columns:
+            logger.error("DataFrame must contain 'close' or 'Close' column")
             return pd.Series()
 
-        log_returns = np.log(data["close"] / data["close"].shift(1))
-        return log_returns
+        return np.log(data[close_col] / data[close_col].shift(1))
 
     def get_correlation_matrix(
         self,
         tickers: List[str],
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None
+        start: Optional[str] = None,
+        end: Optional[str] = None
     ) -> pd.DataFrame:
         """
         Calculate correlation matrix between multiple assets
-        
+
         Args:
             tickers: List of ticker symbols
-            start_date: Start date
-            end_date: End date
-        
+            start: Start date
+            end: End date
+
         Returns:
             Correlation matrix DataFrame
         """
-        data_dict = self.fetch_multiple_tickers(tickers, start_date, end_date)
-        
+        data_dict = self.fetch_multiple_tickers(tickers, start, end)
+
         # Extract closing prices
         closes = pd.DataFrame()
         for ticker, data in data_dict.items():
             if not data.empty:
-                closes[ticker] = data["close"]
+                close_col = 'close' if 'close' in data.columns else 'Close'
+                closes[ticker] = data[close_col]
 
         # Calculate returns correlation - improved NaN handling
-        returns = closes.pct_change().dropna(how='any')  # Remove rows with ANY NaN
-        
+        returns = closes.pct_change().dropna(how='any')
+
         if returns.empty:
             logger.warning("Insufficient data for correlation calculation")
             return pd.DataFrame()
-        
+
         correlation = returns.corr()
 
         logger.info(f"Correlation matrix calculated for {len(tickers)} assets")
@@ -253,10 +226,10 @@ class DataFetcher:
     def validate_data(self, data: pd.DataFrame) -> Tuple[bool, str]:
         """
         Validate downloaded data quality
-        
+
         Args:
             data: DataFrame to validate
-        
+
         Returns:
             Tuple of (is_valid, message)
         """
@@ -279,31 +252,28 @@ class DataFetcher:
     def clear_cache(self, older_than_hours: Optional[int] = None) -> int:
         """
         Clear cache entries, optionally only older than specified hours
-        
+
         Args:
             older_than_hours: Remove cache entries older than N hours (None = clear all)
-        
+
         Returns:
             Number of entries cleared
         """
         if older_than_hours is None:
-            cleared = len(self.data_cache)
-            self.data_cache.clear()
-            self.cache_timestamps.clear()
+            cleared = len(self.cache)
+            self.cache.clear()
             logger.info(f"Cleared {cleared} cache entries")
             return cleared
-        
-        current_time = time.time()
-        cutoff_time = current_time - (older_than_hours * 3600)
+
+        cutoff = datetime.now() - timedelta(hours=older_than_hours)
         keys_to_remove = [
-            key for key, timestamp in self.cache_timestamps.items()
-            if timestamp < cutoff_time
+            key for key, value in self.cache.items()
+            if value['timestamp'] < cutoff
         ]
-        
+
         for key in keys_to_remove:
-            del self.data_cache[key]
-            del self.cache_timestamps[key]
-        
+            del self.cache[key]
+
         logger.info(f"Cleared {len(keys_to_remove)} cache entries older than {older_than_hours} hours")
         return len(keys_to_remove)
 
