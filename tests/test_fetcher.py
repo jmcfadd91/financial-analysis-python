@@ -116,24 +116,24 @@ class TestFetchHistoricalData(unittest.TestCase):
     def test_fetch_historical_data_success(self, mock_download):
         """Test successful historical data fetch"""
         mock_data = pd.DataFrame({
-            'Open': [100, 101, 102],
-            'High': [101, 102, 103],
-            'Low': [99, 100, 101],
-            'Close': [100.5, 101.5, 102.5],
-            'Volume': [1000000, 1100000, 1200000]
+            'open': [100, 101, 102],
+            'high': [101, 102, 103],
+            'low': [99, 100, 101],
+            'close': [100.5, 101.5, 102.5],
+            'volume': [1000000, 1100000, 1200000]
         })
         mock_download.return_value = mock_data
-        
+
         fetcher = DataFetcher()
         result = fetcher.fetch_historical_data('AAPL', start='2023-01-01', end='2023-01-03')
-        
+
         pd.testing.assert_frame_equal(result, mock_data)
         mock_download.assert_called_once()
     
     @patch('src.data.fetcher.yf.download')
     def test_fetch_historical_data_default_dates(self, mock_download):
         """Test historical data fetch with default date parameters"""
-        mock_data = pd.DataFrame({'Close': [100, 101, 102]})
+        mock_data = pd.DataFrame({'close': [100, 101, 102]})
         mock_download.return_value = mock_data
         
         fetcher = DataFetcher()
@@ -145,7 +145,7 @@ class TestFetchHistoricalData(unittest.TestCase):
     @patch('src.data.fetcher.yf.download')
     def test_fetch_historical_data_uses_cache(self, mock_download):
         """Test that cache is used on subsequent calls"""
-        mock_data = pd.DataFrame({'Close': [100, 101, 102]})
+        mock_data = pd.DataFrame({'close': [100, 101, 102]})
         mock_download.return_value = mock_data
         
         fetcher = DataFetcher(cache_ttl=3600)
@@ -162,7 +162,7 @@ class TestFetchHistoricalData(unittest.TestCase):
     @patch('src.data.fetcher.yf.download')
     def test_fetch_historical_data_cache_expired(self, mock_download):
         """Test that cache is not used when expired"""
-        mock_data = pd.DataFrame({'Close': [100, 101, 102]})
+        mock_data = pd.DataFrame({'close': [100, 101, 102]})
         mock_download.return_value = mock_data
         
         fetcher = DataFetcher(cache_ttl=1)
@@ -204,18 +204,18 @@ class TestFetchHistoricalData(unittest.TestCase):
     def test_fetch_historical_data_column_normalization(self, mock_download):
         """Test that columns are properly handled"""
         mock_data = pd.DataFrame({
-            'Close': [100, 101, 102],
-            'Open': [99.5, 100.5, 101.5],
-            'High': [101, 102, 103],
-            'Low': [99, 100, 101],
-            'Volume': [1000000, 1100000, 1200000]
+            'close': [100, 101, 102],
+            'open': [99.5, 100.5, 101.5],
+            'high': [101, 102, 103],
+            'low': [99, 100, 101],
+            'volume': [1000000, 1100000, 1200000]
         })
         mock_download.return_value = mock_data
-        
+
         fetcher = DataFetcher()
         result = fetcher.fetch_historical_data('AAPL', start='2023-01-01', end='2023-01-03')
-        
-        self.assertIn('Close', result.columns)
+
+        self.assertIn('close', result.columns)
 
 
 class TestFetchMultipleTickers(unittest.TestCase):
@@ -225,8 +225,8 @@ class TestFetchMultipleTickers(unittest.TestCase):
     def test_fetch_multiple_tickers(self, mock_download):
         """Test fetching data for multiple tickers"""
         mock_data = pd.DataFrame({
-            'Close': [100, 101, 102],
-            'Open': [99.5, 100.5, 101.5]
+            'close': [100, 101, 102],
+            'open': [99.5, 100.5, 101.5]
         })
         mock_download.return_value = mock_data
         
@@ -245,7 +245,7 @@ class TestFetchMultipleTickers(unittest.TestCase):
     @patch('src.data.fetcher.yf.download')
     def test_fetch_multiple_tickers_respects_rate_limit(self, mock_download):
         """Test that rate limiting is applied between multiple ticker fetches"""
-        mock_data = pd.DataFrame({'Close': [100, 101, 102]})
+        mock_data = pd.DataFrame({'close': [100, 101, 102]})
         mock_download.return_value = mock_data
         
         fetcher = DataFetcher(rate_limit_delay=0.1)
@@ -338,7 +338,7 @@ class TestReturnCalculations(unittest.TestCase):
         prices = pd.Series([100, 0, 102])
         returns = prices.pct_change()
         
-        self.assertTrue(np.isnan(returns.iloc[1]) or np.isinf(returns.iloc[1]))
+        self.assertTrue(np.isnan(returns.iloc[2]) or np.isinf(returns.iloc[2]))
     
     def test_returns_with_single_value(self):
         """Test returns with single price value"""
@@ -560,33 +560,33 @@ class TestIntegration(unittest.TestCase):
     def test_workflow_fetch_and_calculate_returns(self, mock_download):
         """Test complete workflow: fetch data and calculate returns"""
         mock_data = pd.DataFrame({
-            'Close': [100, 101, 102, 103, 104],
-            'Volume': [1000000, 1100000, 1200000, 1300000, 1400000]
+            'close': [100, 101, 102, 103, 104],
+            'volume': [1000000, 1100000, 1200000, 1300000, 1400000]
         })
         mock_download.return_value = mock_data
-        
+
         fetcher = DataFetcher()
         data = fetcher.fetch_historical_data('AAPL', start='2023-01-01', end='2023-01-05')
-        
+
         self.assertFalse(data.empty)
-        self.assertIn('Close', data.columns)
+        self.assertIn('close', data.columns)
     
     @patch('src.data.fetcher.yf.download')
     def test_workflow_fetch_multiple_and_correlate(self, mock_download):
         """Test workflow: fetch multiple tickers and calculate correlation"""
         mock_data = pd.DataFrame({
-            'Close': [100, 101, 102, 103, 104],
+            'close': [100, 101, 102, 103, 104],
         })
         mock_download.return_value = mock_data
-        
+
         fetcher = DataFetcher()
-        
+
         data_aapl = fetcher.fetch_historical_data('AAPL', start='2023-01-01', end='2023-01-05')
         data_msft = fetcher.fetch_historical_data('MSFT', start='2023-01-01', end='2023-01-05')
-        
+
         combined = pd.DataFrame({
-            'AAPL': data_aapl['Close'],
-            'MSFT': data_msft['Close']
+            'AAPL': data_aapl['close'],
+            'MSFT': data_msft['close']
         })
         
         correlation = combined.corr()
@@ -596,7 +596,7 @@ class TestIntegration(unittest.TestCase):
     def test_workflow_with_cache_persistence(self, mock_download):
         """Test that cache persists across multiple operations"""
         mock_data = pd.DataFrame({
-            'Close': [100, 101, 102],
+            'close': [100, 101, 102],
         })
         mock_download.return_value = mock_data
         

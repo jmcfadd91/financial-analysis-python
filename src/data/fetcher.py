@@ -98,6 +98,13 @@ class DataFetcher:
             progress=False
         )
 
+        if not data.empty:
+            # yfinance may return MultiIndex columns like ('Close', 'AAPL') — flatten and lowercase
+            if isinstance(data.columns, pd.MultiIndex):
+                data.columns = [col[0].lower() for col in data.columns]
+            else:
+                data.columns = [col.lower() if isinstance(col, str) else col for col in data.columns]
+
         # Cache the data with timestamp
         self.cache[cache_key] = {'data': data, 'timestamp': datetime.now()}
 

@@ -23,5 +23,8 @@ python-dotenv>=1.0.0
 requests>=2.31.0
 openpyxl>=3.1.0
 
+# Static image export
+kaleido>=0.2.1
+
 # Development
 jupyter>=1.0.0
