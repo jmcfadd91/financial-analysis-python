@@ -12,6 +12,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: sudo apt-get install -y libta-lib-dev
+      - name: Install TA-Lib C library
+        run: |
+          wget https://github.com/ta-lib/ta-lib/releases/download/v0.6.4/ta-lib_0.6.4_amd64.deb
+          sudo dpkg -i ta-lib_0.6.4_amd64.deb
       - run: pip install -r requirements.txt
       - run: pytest tests/ -m unit --tb=short -q
