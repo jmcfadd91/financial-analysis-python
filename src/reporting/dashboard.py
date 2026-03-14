@@ -275,16 +275,21 @@ class Dashboard:
         _apply_dark_theme(fig)
         return fig
 
-    def returns_heatmap(self, freq: str = 'M') -> go.Figure:
+    # Pandas ≥ 2.2 removed the legacy aliases; map them to their replacements.
+    _FREQ_ALIASES = {'M': 'ME', 'Q': 'QE', 'Y': 'YE', 'A': 'YE', 'BM': 'BME', 'BQ': 'BQE'}
+
+    def returns_heatmap(self, freq: str = 'ME') -> go.Figure:
         """
         Calendar-grid heatmap of returns by period.
 
         Args:
-            freq: Resample frequency ('M' for monthly, 'Y' for yearly, etc.)
+            freq: Resample frequency ('ME' for monthly, 'YE' for yearly, etc.)
+                  Legacy aliases ('M', 'Y') are accepted for backwards compatibility.
 
         Returns:
             go.Figure
         """
+        freq = self._FREQ_ALIASES.get(freq, freq)
         returns = self.df['close'].pct_change().dropna()
         resampled = returns.resample(freq).sum()
 
