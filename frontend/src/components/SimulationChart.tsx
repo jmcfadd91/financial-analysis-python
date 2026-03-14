@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../App';
-import { apiClient, SimulateResponse } from '../api/client';
+import type { SimulateResponse } from '../api/client';
+import { apiClient } from '../api/client';
 import PlotlyChart from './PlotlyChart';
 import MetricCards from './MetricCards';
 
@@ -43,35 +44,15 @@ export default function SimulationChart() {
   );
 }
 
-function Control({
-  label,
-  value,
-  onChange,
-  min,
-  max,
-  step,
-}: {
-  label: string;
-  value: number;
-  onChange: (v: number) => void;
-  min: number;
-  max: number;
-  step: number;
+function Control({ label, value, onChange, min, max, step }: {
+  label: string; value: number; onChange: (v: number) => void;
+  min: number; max: number; step: number;
 }) {
   return (
     <div style={styles.control}>
-      <label style={styles.label}>
-        {label}: <strong>{value}</strong>
-      </label>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        style={{ width: 160 }}
-      />
+      <label style={styles.label}>{label}: <strong>{value}</strong></label>
+      <input type="range" min={min} max={max} step={step} value={value}
+        onChange={(e) => onChange(Number(e.target.value))} style={{ width: 160 }} />
     </div>
   );
 }

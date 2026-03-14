@@ -1,6 +1,8 @@
-import React from 'react';
-// @ts-expect-error — react-plotly.js has no bundled types
-import Plot from 'react-plotly.js';
+import { useEffect, useRef } from 'react';
+
+// Plotly is loaded via CDN script tag in index.html
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+declare const Plotly: any;
 
 interface Props {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -9,13 +11,17 @@ interface Props {
 }
 
 export default function PlotlyChart({ figure, height = 500 }: Props) {
-  return (
-    <Plot
-      data={figure.data ?? []}
-      layout={{ ...figure.layout, autosize: true, height }}
-      config={{ responsive: true, displayModeBar: true }}
-      style={{ width: '100%' }}
-      useResizeHandler
-    />
-  );
+  const divRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!divRef.current || !figure?.data || typeof Plotly === 'undefined') return;
+    Plotly.react(
+      divRef.current,
+      figure.data,
+      { ...figure.layout, height, autosize: true },
+      { responsive: true, displayModeBar: true },
+    );
+  }, [figure, height]);
+
+  return <div ref={divRef} style={{ width: '100%', minHeight: height }} />;
 }
