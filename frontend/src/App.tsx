@@ -1,4 +1,23 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, Component } from 'react';
+import type { ReactNode } from 'react';
+
+// ── Error boundary ────────────────────────────────────────────────────────────
+
+class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ color: '#ff6666', padding: 32, background: '#1a1a2e', minHeight: '100vh', fontFamily: 'monospace' }}>
+          <h2 style={{ marginBottom: 16 }}>App crashed — check browser console for details</h2>
+          <pre style={{ whiteSpace: 'pre-wrap' }}>{String(this.state.error)}</pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 import Sidebar from './components/Sidebar';
 import TechChart from './components/TechChart';
 import RiskDashboard from './components/RiskDashboard';
@@ -59,6 +78,7 @@ export default function App() {
   const ActiveComponent = TAB_COMPONENTS[activeTab];
 
   return (
+    <ErrorBoundary>
     <AppContext.Provider
       value={{ ticker, setTicker, start, setStart, end, setEnd, activeTab, setActiveTab, runSignal, triggerRun }}
     >
@@ -90,6 +110,7 @@ export default function App() {
         </div>
       </div>
     </AppContext.Provider>
+    </ErrorBoundary>
   );
 }
 

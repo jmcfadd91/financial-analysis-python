@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../App';
-import { apiClient, PortfolioResponse } from '../api/client';
+import type { PortfolioResponse } from '../api/client';
+import { apiClient } from '../api/client';
 import PlotlyChart from './PlotlyChart';
 import MetricCards from './MetricCards';
 
@@ -60,10 +61,6 @@ export default function PortfolioView() {
           </div>
           <PlotlyChart figure={data.charts[activeChart]} height={520} />
           <MetricCards metrics={data.metrics} exclude={['tickers', 'weights']} />
-          <div style={styles.weights}>
-            <strong>Equal weights:</strong>{' '}
-            {(data.metrics.tickers as string[])?.join(', ')}
-          </div>
         </>
       )}
       {!data && !loading && !error && <Status msg="Configure options and click Run ▶" />}
@@ -99,5 +96,4 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
   },
   toggleActive: { color: '#a0a0ff', borderColor: '#a0a0ff' },
-  weights: { marginTop: 12, fontSize: 12, color: '#8888aa' },
 };
