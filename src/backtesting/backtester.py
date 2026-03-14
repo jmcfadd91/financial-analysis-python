@@ -32,8 +32,9 @@ class Backtester:
 
     def run(self) -> 'Backtester':
         signals = self.strategy.generate_signals(self.df)
-        # Shift signals by 1 to avoid look-ahead
-        positions = signals.shift(1).fillna(0)
+        # Forward-fill so a buy/sell signal is held until an opposing signal
+        # arrives, then shift by 1 bar to avoid look-ahead bias.
+        positions = signals.replace(0, np.nan).ffill().fillna(0).shift(1).fillna(0)
 
         close = self.df['close']
         cash = self.initial_capital

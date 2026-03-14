@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../App';
-import { apiClient, AnalyzeResponse } from '../api/client';
+import type { AnalyzeResponse } from '../api/client';
+import { apiClient } from '../api/client';
 import PlotlyChart from './PlotlyChart';
 import MetricCards from './MetricCards';
 
