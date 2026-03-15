@@ -17,6 +17,7 @@ export default function BacktestView() {
   const [rsiOversold, setRsiOversold] = useState(30);
   const [rsiOverbought, setRsiOverbought] = useState(70);
 
+  const [benchmark, setBenchmark] = useState<string>('');
   const [data, setData] = useState<BacktestResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +32,7 @@ export default function BacktestView() {
     setLoading(true);
     setError(null);
     apiClient
-      .backtest({ ticker, start, end, strategy, params, capital })
+      .backtest({ ticker, start, end, strategy, params, capital, benchmark: benchmark || undefined })
       .then(setData)
       .catch((e) => setError(e?.response?.data?.detail ?? e.message))
       .finally(() => setLoading(false));
@@ -52,6 +53,16 @@ export default function BacktestView() {
           <label style={styles.label}>Capital ($)</label>
           <input style={styles.numInput} type="number" value={capital} min={1000} step={1000}
             onChange={(e) => setCapital(Number(e.target.value))} />
+        </div>
+        <div style={styles.controlGroup}>
+          <label style={styles.label}>Benchmark</label>
+          <select style={styles.select} value={benchmark} onChange={(e) => setBenchmark(e.target.value)}>
+            <option value="">None</option>
+            <option value="SPY">SPY</option>
+            <option value="QQQ">QQQ</option>
+            <option value="DIA">DIA</option>
+            <option value="IWM">IWM</option>
+          </select>
         </div>
         {strategy === 'sma' && (
           <>

@@ -43,6 +43,7 @@ class BacktestRequest(BaseModel):
     start: str = "2024-01-01"
     end: str = "2025-01-01"
     capital: float = 10_000.0
+    benchmark: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +69,97 @@ class BacktestResponse(BaseModel):
     chart: Dict[str, Any]
     summary: Dict[str, Any]
     trades: List[Dict[str, Any]]
+
+
+# ---------------------------------------------------------------------------
+# Positions models
+# ---------------------------------------------------------------------------
+
+class Position(BaseModel):
+    id: str
+    ticker: str
+    shares: float
+    entry_price: float
+    entry_date: str
+
+
+class AddPositionRequest(BaseModel):
+    ticker: str
+    shares: float
+    entry_price: float
+    entry_date: str
+
+
+class PositionRow(BaseModel):
+    id: str
+    ticker: str
+    shares: float
+    entry_price: float
+    entry_date: str
+    current_price: Optional[float]
+    cost_basis: float
+    current_value: Optional[float]
+    pnl: Optional[float]
+    pnl_pct: Optional[float]
+
+
+class PortfolioSummary(BaseModel):
+    total_invested: float
+    total_value: Optional[float]
+    total_pnl: Optional[float]
+    total_return_pct: Optional[float]
+
+
+class GetPositionsResponse(BaseModel):
+    positions: List[PositionRow]
+    summary: PortfolioSummary
+    allocation_chart: Dict[str, Any]
+
+
+class SimulatePortfolioRequest(BaseModel):
+    n_simulations: int = 1000
+    horizon_days: int = 252
+    history_days: int = 365
+
+
+class SimulatePortfolioResponse(BaseModel):
+    chart: Dict[str, Any]
+    metrics: Dict[str, Any]
+
+
+# ---------------------------------------------------------------------------
+# Watchlist models
+# ---------------------------------------------------------------------------
+
+class AddWatchlistRequest(BaseModel):
+    ticker: str
+
+
+class WatchlistItem(BaseModel):
+    ticker: str
+    current_price: Optional[float]
+    day_change_pct: Optional[float]
+    rsi: Optional[float]
+    prices: List[float]
+
+
+class GetWatchlistResponse(BaseModel):
+    items: List[WatchlistItem]
+
+
+# ---------------------------------------------------------------------------
+# Notification models
+# ---------------------------------------------------------------------------
+
+class NotificationConfigRequest(BaseModel):
+    bot_token: str
+    chat_id: str
+
+
+class NotificationConfigResponse(BaseModel):
+    bot_token_set: bool
+    bot_token_masked: str   # e.g. "123456:A***xyz"
+    chat_id: str
 
 
 # ---------------------------------------------------------------------------

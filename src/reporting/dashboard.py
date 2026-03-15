@@ -155,11 +155,24 @@ class Dashboard:
             subplot_titles=[f'{self.ticker} Price', 'RSI', 'MACD']
         )
 
-        # Row 1: price
-        fig.add_trace(go.Scatter(
-            x=self.df.index, y=self.df['close'],
-            name='Close', line=dict(color=THEME['up'])
-        ), row=1, col=1)
+        # Row 1: price (candlestick if OHLC available, else close line)
+        has_ohlc = all(c in self.df.columns for c in ['open', 'high', 'low', 'close'])
+        if has_ohlc:
+            fig.add_trace(go.Candlestick(
+                x=self.df.index,
+                open=self.df['open'],
+                high=self.df['high'],
+                low=self.df['low'],
+                close=self.df['close'],
+                name=self.ticker,
+                increasing_line_color=THEME['up'],
+                decreasing_line_color=THEME['down'],
+            ), row=1, col=1)
+        else:
+            fig.add_trace(go.Scatter(
+                x=self.df.index, y=self.df['close'],
+                name='Close', line=dict(color=THEME['up'])
+            ), row=1, col=1)
 
         if self.technical is not None:
             cached = self.technical.indicators
@@ -328,7 +341,7 @@ class Dashboard:
                           xaxis_title='Days', yaxis_title='Price')
         return fig
 
-    def equity_chart(self, backtester) -> go.Figure:
+    def equity_chart(self, backtester, benchmark_series: Optional[pd.Series] = None) -> go.Figure:
         """2-row subplot: equity curve + price with buy/sell markers."""
         eq = backtester.equity_curve
         price = self.df['close']
@@ -339,6 +352,12 @@ class Dashboard:
 
         fig.add_trace(go.Scatter(x=eq.index, y=eq.values, name='Equity',
                                  line=dict(color='blue')), row=1, col=1)
+
+        if benchmark_series is not None:
+            fig.add_trace(go.Scatter(
+                x=benchmark_series.index, y=benchmark_series.values,
+                name='Benchmark', line=dict(color='#aaaaaa', dash='dash')
+            ), row=1, col=1)
         fig.add_trace(go.Scatter(x=price.index, y=price.values, name='Price',
                                  line=dict(color='gray')), row=2, col=1)
 

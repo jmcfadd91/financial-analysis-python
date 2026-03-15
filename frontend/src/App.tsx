@@ -24,10 +24,13 @@ import RiskDashboard from './components/RiskDashboard';
 import PortfolioView from './components/PortfolioView';
 import SimulationChart from './components/SimulationChart';
 import BacktestView from './components/BacktestView';
+import PositionsView from './components/PositionsView';
+import WatchlistView from './components/WatchlistView';
+import NotificationsView from './components/NotificationsView';
 
 // ── Shared state ─────────────────────────────────────────────────────────────
 
-export type Tab = 'technical' | 'risk' | 'portfolio' | 'simulation' | 'backtest';
+export type Tab = 'technical' | 'risk' | 'portfolio' | 'simulation' | 'backtest' | 'positions' | 'watchlist' | 'alerts';
 
 export interface AppState {
   ticker: string;
@@ -54,6 +57,9 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'portfolio', label: 'Portfolio' },
   { id: 'simulation', label: 'Simulation' },
   { id: 'backtest', label: 'Backtest' },
+  { id: 'positions', label: 'Positions' },
+  { id: 'watchlist', label: 'Watchlist' },
+  { id: 'alerts', label: 'Alerts' },
 ];
 
 const TAB_COMPONENTS: Record<Tab, React.FC> = {
@@ -62,6 +68,9 @@ const TAB_COMPONENTS: Record<Tab, React.FC> = {
   portfolio: PortfolioView,
   simulation: SimulationChart,
   backtest: BacktestView,
+  positions: PositionsView,
+  watchlist: WatchlistView,
+  alerts: NotificationsView,
 };
 
 // ── App ───────────────────────────────────────────────────────────────────────

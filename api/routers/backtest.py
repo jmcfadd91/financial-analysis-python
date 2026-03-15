@@ -43,10 +43,25 @@ async def backtest(req: BacktestRequest) -> BacktestResponse:
         bt = Backtester(df, strategy, initial_capital=req.capital)
         bt.run()
 
+        benchmark_series = None
+        benchmark_return = None
+        if req.benchmark:
+            try:
+                bench_df = _fetcher.fetch_historical_data(req.benchmark, req.start, req.end)
+                bench_equity = (bench_df['close'] / bench_df['close'].iloc[0]) * req.capital
+                bench_equity = bench_equity.reindex(bt.equity_curve.index, method='ffill').dropna()
+                if not bench_equity.empty:
+                    benchmark_series = bench_equity
+                    benchmark_return = _clean((bench_equity.iloc[-1] / req.capital - 1) * 100)
+            except Exception:
+                pass  # benchmark failure is non-fatal
+
         dash = Dashboard(ticker=req.ticker, df=df)
-        chart = json.loads(dash.equity_chart(bt).to_json())
+        chart = json.loads(dash.equity_chart(bt, benchmark_series=benchmark_series).to_json())
 
         summary = _clean(bt.summary())
+        if benchmark_return is not None:
+            summary['benchmark_return'] = benchmark_return
 
         trades_df = bt.trades
         if trades_df.empty:
