@@ -10,7 +10,11 @@ from typing import Optional
 
 import requests
 
+from src.analysis.technical import compute_rsi_ewm
+
 logger = logging.getLogger(__name__)
+
+_PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 _RSI_OVERSOLD = 30
 _RSI_OVERBOUGHT = 70
@@ -164,7 +168,7 @@ class TelegramNotifier:
         fetcher = DataFetcher()
 
         # ── Watchlist ──────────────────────────────────────────────────
-        watchlist_path = Path("data/watchlist.json")
+        watchlist_path = _PROJECT_ROOT / "data" / "watchlist.json"
         tickers: list[str] = []
         if watchlist_path.exists():
             try:
@@ -184,11 +188,7 @@ class TelegramNotifier:
                 prev = float(df["close"].iloc[-2])
                 change = (price - prev) / prev * 100
 
-                # Simple RSI (EWM)
-                delta = df["close"].diff()
-                gain = delta.clip(lower=0).ewm(com=13, adjust=False).mean()
-                loss = (-delta.clip(upper=0)).ewm(com=13, adjust=False).mean()
-                rsi = float((100 - 100 / (1 + gain / loss)).iloc[-1])
+                rsi = float(compute_rsi_ewm(df["close"]).iloc[-1])
 
                 watchlist_items.append({
                     "ticker": ticker,
@@ -201,7 +201,7 @@ class TelegramNotifier:
                 watchlist_items.append({"ticker": ticker, "current_price": None, "day_change_pct": None, "rsi": None})
 
         # ── Positions ──────────────────────────────────────────────────
-        portfolio_path = Path("data/portfolio.json")
+        portfolio_path = _PROJECT_ROOT / "data" / "portfolio.json"
         raw_positions: list[dict] = []
         if portfolio_path.exists():
             try:

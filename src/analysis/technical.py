@@ -6,6 +6,20 @@ from src.utils.logger import setup_logger
 logger = setup_logger(__name__)
 
 
+def compute_rsi_ewm(close: pd.Series) -> pd.Series:
+    """
+    Compute RSI using Wilder's EWM smoothing (com=13 ≈ 14-period).
+
+    This is the shared RSI implementation used across the codebase.
+    Returns a Series of RSI values [0–100] aligned to close.index.
+    """
+    delta = close.diff()
+    gain = delta.clip(lower=0).ewm(com=13, adjust=False).mean()
+    loss = (-delta.clip(upper=0)).ewm(com=13, adjust=False).mean()
+    rs = gain / loss.replace(0, np.nan)
+    return 100 - 100 / (1 + rs)
+
+
 class TechnicalAnalyzer:
     """
     Technical analysis toolkit for financial data.
@@ -269,70 +283,57 @@ class TechnicalAnalyzer:
             >>> buy_signals = signals[signals['signal'] == 1]
         """
         logger.info("Generating trading signals...")
-        
+
         signals = pd.DataFrame(index=self.df.index)
         signals['signal'] = 0
         signals['strength'] = 0.0
-        signals['reason'] = ''
-        
+        signals['reason'] = 'neutral'
+
         try:
-            # Calculate indicators if not already cached
+            # Per-row strength: buy contributions are positive, sell are negative.
+            buy_strength = pd.Series(0.0, index=self.df.index)
+            sell_strength = pd.Series(0.0, index=self.df.index)
+
+            # RSI signals (per-row)
             rsi = self.rsi(period=14)
-            
-            signal_strength = 0.0
-            reasons = []
-            
-            # RSI signals
-            oversold = rsi < rsi_oversold
-            overbought = rsi > rsi_overbought
-            
-            if oversold.any():
-                signal_strength += 0.3
-                reasons.append("RSI_oversold")
-            
-            if overbought.any():
-                signal_strength -= 0.3
-                reasons.append("RSI_overbought")
-            
-            # MACD signals
+            buy_strength[rsi < rsi_oversold] += 0.4
+            sell_strength[rsi > rsi_overbought] += 0.4
+
+            # MACD signals (per-row)
             if use_macd:
                 macd_df = self.macd()
                 if not macd_df.empty:
-                    macd_positive = macd_df['histogram'] > 0
-                    if macd_positive.any():
-                        signal_strength += 0.35
-                        reasons.append("MACD_positive")
-                    else:
-                        signal_strength -= 0.35
-                        reasons.append("MACD_negative")
-            
-            # Bollinger Bands signals
+                    buy_strength[macd_df['histogram'] > 0] += 0.3
+                    sell_strength[macd_df['histogram'] < 0] += 0.3
+
+            # Bollinger Band signals (per-row: below lower band = buy, above upper = sell)
             if use_bb:
                 bb = self.bollinger_bands()
                 if not bb.empty:
-                    near_lower = self.df['close'] < bb['middle']
-                    near_upper = self.df['close'] > bb['middle']
-                    
-                    if near_lower.any():
-                        signal_strength += 0.35
-                        reasons.append("BB_lower")
-                    
-                    if near_upper.any():
-                        signal_strength -= 0.35
-                        reasons.append("BB_upper")
-            
-            # Determine signal
-            signals['strength'] = np.clip(signal_strength, -1, 1)
+                    buy_strength[self.df['close'] < bb['lower']] += 0.3
+                    sell_strength[self.df['close'] > bb['upper']] += 0.3
+
+            net = buy_strength - sell_strength
+            signals['strength'] = np.clip(net, -1, 1)
             signals['signal'] = signals['strength'].apply(
-                lambda x: 1 if x > 0.5 else (-1 if x < -0.5 else 0)
+                lambda x: 1 if x > 0.3 else (-1 if x < -0.3 else 0)
             )
-            signals['reason'] = ','.join(reasons) if reasons else 'neutral'
-            
+
+            # Build a descriptive reason label for rows with a signal
+            def _reason(row_strength: float) -> str:
+                if row_strength > 0.3:
+                    return 'buy_signal'
+                if row_strength < -0.3:
+                    return 'sell_signal'
+                return 'neutral'
+
+            signals['reason'] = signals['strength'].apply(_reason)
+
             logger.info(f"Generated {(signals['signal'] != 0).sum()} signals")
             return signals
-            
+
         except Exception as e:
-            logger.error(f"Error generating signals: {str(e)}")
+            logger.error(f"Error generating signals: {e}", exc_info=True)
             return signals
     
     def get_all_indicators(self) -> dict:

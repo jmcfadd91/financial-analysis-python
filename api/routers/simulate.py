@@ -26,7 +26,7 @@ async def simulate(req: SimulateRequest) -> SimulateResponse:
             n_simulations=req.n_simulations,
             horizon_days=req.horizon_days,
         )
-        sim.simulate(seed=42)
+        sim.simulate()
 
         dash = Dashboard(ticker=req.ticker, df=df)
         chart = json.loads(dash.simulation_chart(sim).to_json())

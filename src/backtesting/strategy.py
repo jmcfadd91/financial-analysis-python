@@ -47,6 +47,11 @@ class RSIThreshold(Strategy):
         rsi = 100 - (100 / (1 + rs))
 
         signals = pd.Series(0, index=df.index, dtype=int)
-        signals[rsi < self.oversold] = 1
-        signals[rsi > self.overbought] = -1
+        # Signal on crossover, not on level membership, to avoid persistent signals
+        # BUY: RSI recovers above oversold threshold (was below, now at/above)
+        cross_above_oversold = (rsi >= self.oversold) & (rsi.shift(1) < self.oversold)
+        # SELL: RSI falls below overbought threshold (was above, now at/below)
+        cross_below_overbought = (rsi <= self.overbought) & (rsi.shift(1) > self.overbought)
+        signals[cross_above_oversold] = 1
+        signals[cross_below_overbought] = -1
         return signals

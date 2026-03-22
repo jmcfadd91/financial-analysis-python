@@ -27,7 +27,8 @@ from src.reporting.dashboard import Dashboard
 router = APIRouter()
 _fetcher = DataFetcher()
 
-_DATA_FILE = Path("data/portfolio.json")
+_PROJECT_ROOT = Path(__file__).parent.parent.parent
+_DATA_FILE = _PROJECT_ROOT / "data" / "portfolio.json"
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +43,10 @@ def _load_positions() -> List[dict]:
 
 def _save_positions(positions: List[dict]) -> None:
     _DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _DATA_FILE.write_text(json.dumps({"positions": positions}, indent=2))
+    # Write to a temp file then rename for atomicity (prevents partial writes on concurrent requests)
+    tmp = _DATA_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"positions": positions}, indent=2))
+    tmp.replace(_DATA_FILE)
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +261,7 @@ async def simulate_portfolio(req: SimulatePortfolioRequest) -> SimulatePortfolio
             n_simulations=req.n_simulations,
             horizon_days=req.horizon_days,
         )
-        sim.simulate(seed=42)
+        sim.simulate()
 
         dash = Dashboard(ticker="Portfolio", df=portfolio_df)
         chart = json.loads(dash.simulation_chart(sim).to_json())

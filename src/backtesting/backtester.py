@@ -51,8 +51,8 @@ class Backtester:
 
             # Check for position change
             if pos != current_position:
-                if current_position != 0 and entry_date is not None:
-                    # Close existing position
+                if current_position == 1 and entry_date is not None:
+                    # Close long position: sell shares
                     proceeds = shares * price * (1 - self.commission)
                     cash += proceeds
                     pnl = proceeds - (shares * entry_price * (1 + self.commission))
@@ -64,6 +64,28 @@ class Backtester:
                         'exit_price': price,
                         'pnl': pnl,
                         'return': ret,
+                        'side': 'long',
+                    })
+                    shares = 0.0
+                    current_position = 0
+                    entry_date = None
+                    entry_price = None
+
+                elif current_position == -1 and entry_date is not None:
+                    # Close short position: buy back shares at current price
+                    buy_cost = shares * price * (1 + self.commission)
+                    cash -= buy_cost
+                    received = shares * entry_price * (1 - self.commission)
+                    pnl = received - buy_cost
+                    ret = pnl / received if received > 0 else 0
+                    trade_list.append({
+                        'entry_date': entry_date,
+                        'exit_date': date,
+                        'entry_price': entry_price,
+                        'exit_price': price,
+                        'pnl': pnl,
+                        'return': ret,
+                        'side': 'short',
                     })
                     shares = 0.0
                     current_position = 0
@@ -72,21 +94,29 @@ class Backtester:
 
                 if pos == 1 and cash > 0:
                     # Open long position
-                    cost = cash / (price * (1 + self.commission))
-                    shares = cost
+                    shares = cash / (price * (1 + self.commission))
                     cash -= shares * price * (1 + self.commission)
                     current_position = 1
                     entry_date = date
                     entry_price = price
-                elif pos == -1:
+                elif pos == -1 and cash > 0:
+                    # Open short position: borrow shares, receive cash proceeds
+                    shares = cash / (price * (1 + self.commission))
+                    cash += shares * price * (1 - self.commission)
                     current_position = -1
+                    entry_date = date
+                    entry_price = price
 
-            equity.append(cash + shares * price)
+            # Equity: long → cash + market value; short → cash - market value owed
+            if current_position == -1:
+                equity.append(cash - shares * price)
+            else:
+                equity.append(cash + shares * price)
 
         self._equity_curve = pd.Series(equity, index=close.index)
         self._trades = pd.DataFrame(trade_list)
         if self._trades.empty:
-            self._trades = pd.DataFrame(columns=['entry_date', 'exit_date', 'entry_price', 'exit_price', 'pnl', 'return'])
+            self._trades = pd.DataFrame(columns=['entry_date', 'exit_date', 'entry_price', 'exit_price', 'pnl', 'return', 'side'])
 
         logger.info(f"Backtest complete: {len(trade_list)} trades")
         return self

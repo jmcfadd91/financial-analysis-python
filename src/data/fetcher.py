@@ -8,15 +8,11 @@ import pandas as pd
 import numpy as np
 from typing import List, Tuple, Optional, Dict
 from datetime import datetime, timedelta
-import logging
 import time
 
-# Configure logging with proper format
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+from src.utils.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 class DataFetcher:
@@ -253,6 +249,7 @@ class DataFetcher:
         nan_count = data.isnull().sum().sum()
         if nan_count > 0:
             logger.warning(f"Found {nan_count} NaN values in data")
+            return True, f"Data validation passed with {nan_count} NaN values — consider cleaning before use"
 
         return True, "Data validation passed"
 

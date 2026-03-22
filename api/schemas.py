@@ -3,11 +3,24 @@
 from __future__ import annotations
 
 import math
+import re
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+
+_TICKER_RE = re.compile(r'^[A-Z0-9.\-]{1,20}$')
+
+
+def _default_start() -> str:
+    return (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+
+
+def _default_end() -> str:
+    return datetime.now().strftime("%Y-%m-%d")
 
 
 # ---------------------------------------------------------------------------
@@ -16,34 +29,103 @@ from pydantic import BaseModel
 
 class AnalyzeRequest(BaseModel):
     ticker: str
-    start: str = "2024-01-01"
-    end: str = "2025-01-01"
+    start: str = ""
+    end: str = ""
     interval: str = "1d"
+
+    @field_validator("ticker")
+    @classmethod
+    def validate_ticker(cls, v: str) -> str:
+        v = v.upper().strip()
+        if not _TICKER_RE.match(v):
+            raise ValueError(f"Invalid ticker '{v}': must be 1–20 uppercase alphanumeric characters, dots, or hyphens")
+        return v
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.start:
+            object.__setattr__(self, "start", _default_start())
+        if not self.end:
+            object.__setattr__(self, "end", _default_end())
 
 
 class PortfolioRequest(BaseModel):
     tickers: List[str]
     weights: Optional[List[float]] = None
-    start: str = "2024-01-01"
-    end: str = "2025-01-01"
+    start: str = ""
+    end: str = ""
+
+    @field_validator("tickers", mode="before")
+    @classmethod
+    def validate_tickers(cls, v: List[str]) -> List[str]:
+        result = []
+        for t in v:
+            t = t.upper().strip()
+            if not _TICKER_RE.match(t):
+                raise ValueError(f"Invalid ticker '{t}'")
+            result.append(t)
+        return result
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.start:
+            object.__setattr__(self, "start", _default_start())
+        if not self.end:
+            object.__setattr__(self, "end", _default_end())
 
 
 class SimulateRequest(BaseModel):
     ticker: str
-    start: str = "2024-01-01"
-    end: str = "2025-01-01"
+    start: str = ""
+    end: str = ""
     n_simulations: int = 1000
     horizon_days: int = 252
+
+    @field_validator("ticker")
+    @classmethod
+    def validate_ticker(cls, v: str) -> str:
+        v = v.upper().strip()
+        if not _TICKER_RE.match(v):
+            raise ValueError(f"Invalid ticker '{v}'")
+        return v
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.start:
+            object.__setattr__(self, "start", _default_start())
+        if not self.end:
+            object.__setattr__(self, "end", _default_end())
 
 
 class BacktestRequest(BaseModel):
     ticker: str
     strategy: str = "sma"   # "sma" | "rsi"
     params: Dict[str, Any] = {}
-    start: str = "2024-01-01"
-    end: str = "2025-01-01"
+    start: str = ""
+    end: str = ""
     capital: float = 10_000.0
     benchmark: Optional[str] = None
+
+    @field_validator("ticker")
+    @classmethod
+    def validate_ticker(cls, v: str) -> str:
+        v = v.upper().strip()
+        if not _TICKER_RE.match(v):
+            raise ValueError(f"Invalid ticker '{v}'")
+        return v
+
+    @field_validator("params")
+    @classmethod
+    def validate_params(cls, v: Dict[str, Any]) -> Dict[str, Any]:
+        for key in ("fast", "slow", "period"):
+            if key in v:
+                val = int(v[key])
+                if val < 2:
+                    raise ValueError(f"Strategy param '{key}' must be >= 2, got {val}")
+        return v
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.start:
+            object.__setattr__(self, "start", _default_start())
+        if not self.end:
+            object.__setattr__(self, "end", _default_end())
 
 
 # ---------------------------------------------------------------------------

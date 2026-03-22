@@ -10,7 +10,9 @@ from src.reporting.notifier import TelegramNotifier
 
 router = APIRouter()
 
-_CONFIG_PATH = Path("data/notification_config.json")
+# Anchor to project root regardless of the working directory at runtime
+_PROJECT_ROOT = Path(__file__).parent.parent.parent
+_CONFIG_PATH = _PROJECT_ROOT / "data" / "notification_config.json"
 
 
 def _load_config() -> dict:
@@ -28,10 +30,10 @@ def _save_config(bot_token: str, chat_id: str) -> None:
 
 
 def _mask_token(token: str) -> str:
-    """Return e.g. '123456:A***xyz' — reveal first 8 and last 3 chars."""
-    if len(token) <= 11:
+    """Return masked token, revealing only the first 4 characters."""
+    if len(token) <= 4:
         return "***"
-    return token[:8] + "***" + token[-3:]
+    return token[:4] + "***"
 
 
 @router.get("/notifications/config", response_model=NotificationConfigResponse)

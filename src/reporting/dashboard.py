@@ -229,7 +229,7 @@ class Dashboard:
         if self.risk is None:
             raise ValueError("No RiskAnalyzer provided. Pass risk= to Dashboard.")
 
-        returns = self.risk._returns
+        returns = self.risk.returns
         close = self.df['close']
 
         fig = make_subplots(
