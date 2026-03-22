@@ -154,7 +154,7 @@ class TestBacktesterRun:
         flat_df = pd.DataFrame({'close': [100.0] * 50}, index=dates)
         bt = Backtester(flat_df, SMACrossover(fast=5, slow=10))
         bt.run()
-        assert list(bt.trades.columns) == ['entry_date', 'exit_date', 'entry_price', 'exit_price', 'pnl', 'return']
+        assert list(bt.trades.columns) == ['entry_date', 'exit_date', 'entry_price', 'exit_price', 'pnl', 'return', 'side']
 
 
 @pytest.mark.unit
