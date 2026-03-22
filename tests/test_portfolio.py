@@ -198,8 +198,8 @@ class TestGetAllMetrics:
             assert np.isfinite(v)
 
     def test_metrics_stored_on_instance(self, portfolio_analyzer):
-        portfolio_analyzer.get_all_metrics()
-        assert len(portfolio_analyzer.metrics) == 3
+        metrics = portfolio_analyzer.get_all_metrics()
+        assert len(metrics) == 3
 
     def test_get_all_metrics_consistent(self, portfolio_analyzer):
         metrics = portfolio_analyzer.get_all_metrics()

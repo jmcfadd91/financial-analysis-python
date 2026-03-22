@@ -68,7 +68,7 @@ class MonteCarloSimulator:
 
     def value_at_risk(self, confidence: float = 0.95) -> float:
         if self.results is None:
-            raise ValueError("Must call simulate() before value_at_risk()")
+            self.simulate()
         final_prices = self.results[:, -1]
         final_returns = final_prices / self._s0 - 1
         var = float(np.percentile(final_returns, (1 - confidence) * 100))

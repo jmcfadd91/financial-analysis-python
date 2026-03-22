@@ -66,7 +66,7 @@ class PortfolioAnalyzer:
         rng = np.random.default_rng(42)
         for _ in range(n_portfolios):
             w = rng.random(n)
-            w /= w.sum()
+            w = w / w.sum()
             r = float(np.dot(w, mean_annual))
             v = float(np.sqrt(w @ cov.values @ w))
             s = (r - self.risk_free_rate) / v if v > 0 else 0.0
@@ -75,9 +75,8 @@ class PortfolioAnalyzer:
         return pd.DataFrame(results)
 
     def get_all_metrics(self) -> dict:
-        self.metrics = {
+        return {
             'portfolio_return': self.portfolio_return(),
             'portfolio_volatility': self.portfolio_volatility(),
             'sharpe_ratio': self.sharpe_ratio(),
         }
-        return self.metrics

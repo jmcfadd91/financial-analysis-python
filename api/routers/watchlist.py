@@ -1,18 +1,22 @@
 """GET/POST/DELETE /api/watchlist — watchlist management."""
 
 import json
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Response
 
 from api.schemas import AddWatchlistRequest, GetWatchlistResponse, WatchlistItem, _clean
+from src.analysis.technical import compute_rsi_ewm
 from src.data.fetcher import DataFetcher
 
 router = APIRouter()
 _fetcher = DataFetcher()
+logger = logging.getLogger(__name__)
 
-_WATCHLIST_PATH = Path("data/watchlist.json")
+_PROJECT_ROOT = Path(__file__).parent.parent.parent
+_WATCHLIST_PATH = _PROJECT_ROOT / "data" / "watchlist.json"
 
 
 def _load_tickers() -> list[str]:
@@ -22,15 +26,11 @@ def _load_tickers() -> list[str]:
 
 
 def _save_tickers(tickers: list[str]) -> None:
+    # Atomic write: write to temp then rename to prevent partial writes on concurrent requests
     _WATCHLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _WATCHLIST_PATH.write_text(json.dumps({"tickers": tickers}))
-
-
-def _compute_rsi(close_series) -> float:
-    delta = close_series.diff()
-    gain = delta.clip(lower=0).ewm(com=13, adjust=False).mean()
-    loss = (-delta.clip(upper=0)).ewm(com=13, adjust=False).mean()
-    return float((100 - 100 / (1 + gain / loss)).iloc[-1])
+    tmp = _WATCHLIST_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"tickers": tickers}))
+    tmp.replace(_WATCHLIST_PATH)
 
 
 def _enrich(ticker: str) -> WatchlistItem:
@@ -43,7 +43,7 @@ def _enrich(ticker: str) -> WatchlistItem:
         current_price = float(df["close"].iloc[-1])
         prev_close = float(df["close"].iloc[-2])
         day_change_pct = (current_price - prev_close) / prev_close * 100
-        rsi = _compute_rsi(df["close"])
+        rsi = float(compute_rsi_ewm(df["close"]).iloc[-1])
         prices = _clean(df["close"].tail(30).tolist())
         return WatchlistItem(
             ticker=ticker,
@@ -52,7 +52,8 @@ def _enrich(ticker: str) -> WatchlistItem:
             rsi=rsi,
             prices=prices,
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning("Could not enrich watchlist ticker %s: %s", ticker, exc)
         return WatchlistItem(
             ticker=ticker,
             current_price=None,

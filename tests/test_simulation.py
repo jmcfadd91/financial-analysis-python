@@ -150,10 +150,11 @@ class TestProbabilityAndReturn:
 
 @pytest.mark.unit
 class TestValueAtRisk:
-    def test_var_raises_before_simulate(self, sample_dataframe):
+    def test_var_auto_simulates_before_compute(self, sample_dataframe):
+        # value_at_risk() now auto-simulates if simulate() hasn't been called
         sim = MonteCarloSimulator(sample_dataframe, n_simulations=50, horizon_days=10)
-        with pytest.raises(ValueError, match="simulate"):
-            sim.value_at_risk()
+        var = sim.value_at_risk()
+        assert isinstance(var, float)
 
     def test_var_is_float(self, simulator):
         simulator.simulate(seed=42)

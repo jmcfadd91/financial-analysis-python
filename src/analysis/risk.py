@@ -51,6 +51,11 @@ class RiskAnalyzer:
         self._returns = self.df['close'].pct_change().dropna()
         logger.info(f"RiskAnalyzer initialized with {len(df)} bars")
 
+    @property
+    def returns(self) -> pd.Series:
+        """Daily return series (public accessor)."""
+        return self._returns
+
     def sharpe_ratio(self, periods: int = 252) -> float:
         """
         Calculate annualised Sharpe ratio.
