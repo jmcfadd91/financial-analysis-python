@@ -1,11 +1,22 @@
 """FastAPI application entry point."""
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routers import analyze, backtest, notifications, portfolio, positions, simulate, watchlist
+from src.db import init_db
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
 
 app = FastAPI(
+    lifespan=lifespan,
     title="Financial Analysis API",
     description="Bloomberg-style financial analysis toolkit — REST API",
     version="1.0.0",

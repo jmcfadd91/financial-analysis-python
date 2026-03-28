@@ -3,12 +3,12 @@
 import json
 import uuid
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Dict, List, Optional
 
 import pandas as pd
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
+from sqlalchemy.orm import Session
 
 from api.schemas import (
     AddPositionRequest,
@@ -22,31 +22,11 @@ from api.schemas import (
 )
 from src.analysis.simulation import MonteCarloSimulator
 from src.data.fetcher import DataFetcher
+from src.db import PositionModel, get_db
 from src.reporting.dashboard import Dashboard
 
 router = APIRouter()
 _fetcher = DataFetcher()
-
-_PROJECT_ROOT = Path(__file__).parent.parent.parent
-_DATA_FILE = _PROJECT_ROOT / "data" / "portfolio.json"
-
-
-# ---------------------------------------------------------------------------
-# File helpers
-# ---------------------------------------------------------------------------
-
-def _load_positions() -> List[dict]:
-    if not _DATA_FILE.exists():
-        return []
-    return json.loads(_DATA_FILE.read_text()).get("positions", [])
-
-
-def _save_positions(positions: List[dict]) -> None:
-    _DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    # Write to a temp file then rename for atomicity (prevents partial writes on concurrent requests)
-    tmp = _DATA_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"positions": positions}, indent=2))
-    tmp.replace(_DATA_FILE)
 
 
 # ---------------------------------------------------------------------------
@@ -120,17 +100,15 @@ def _allocation_chart(rows: List[PositionRow]) -> dict:
 # ---------------------------------------------------------------------------
 
 def _build_portfolio_series(
-    positions: List[dict], data: Dict[str, pd.DataFrame]
+    positions: List[PositionModel], data: Dict[str, pd.DataFrame]
 ) -> pd.DataFrame:
     """
     Aggregate shares per ticker, build a combined dollar-value series.
     Returns a DataFrame with a 'close' column representing total portfolio value.
     """
-    # Aggregate shares per ticker (multiple lots → sum)
     shares_map: Dict[str, float] = {}
     for pos in positions:
-        ticker = pos["ticker"]
-        shares_map[ticker] = shares_map.get(ticker, 0.0) + pos["shares"]
+        shares_map[pos.ticker] = shares_map.get(pos.ticker, 0.0) + pos.shares
 
     value_series: Dict[str, pd.Series] = {}
     for ticker, shares in shares_map.items():
@@ -150,24 +128,24 @@ def _build_portfolio_series(
 # ---------------------------------------------------------------------------
 
 @router.get("/positions", response_model=GetPositionsResponse)
-async def get_positions() -> GetPositionsResponse:
-    raw = _load_positions()
+async def get_positions(db: Session = Depends(get_db)) -> GetPositionsResponse:
+    raw = db.query(PositionModel).all()
 
     rows: List[PositionRow] = []
     for p in raw:
-        current_price = _get_current_price(p["ticker"])
-        cost_basis = p["shares"] * p["entry_price"]
-        current_value = p["shares"] * current_price if current_price is not None else None
+        current_price = _get_current_price(p.ticker)
+        cost_basis = p.shares * p.entry_price
+        current_value = p.shares * current_price if current_price is not None else None
         pnl = (current_value - cost_basis) if current_value is not None else None
         pnl_pct = (pnl / cost_basis * 100) if (pnl is not None and cost_basis != 0) else None
 
         rows.append(
             PositionRow(
-                id=p["id"],
-                ticker=p["ticker"],
-                shares=p["shares"],
-                entry_price=p["entry_price"],
-                entry_date=p["entry_date"],
+                id=p.id,
+                ticker=p.ticker,
+                shares=p.shares,
+                entry_price=p.entry_price,
+                entry_date=p.entry_date,
                 current_price=current_price,
                 cost_basis=cost_basis,
                 current_value=current_value,
@@ -201,49 +179,55 @@ async def get_positions() -> GetPositionsResponse:
 
 
 @router.post("/positions", response_model=Position, status_code=201)
-async def add_position(req: AddPositionRequest) -> Position:
-    # Validate ticker by attempting a price fetch
+async def add_position(req: AddPositionRequest, db: Session = Depends(get_db)) -> Position:
     price = _get_current_price(req.ticker.upper())
     if price is None:
         raise HTTPException(
             status_code=422, detail=f"Could not fetch data for ticker '{req.ticker}'. Check the symbol."
         )
 
-    position = {
-        "id": str(uuid.uuid4()),
-        "ticker": req.ticker.upper(),
-        "shares": req.shares,
-        "entry_price": req.entry_price,
-        "entry_date": req.entry_date,
-    }
+    position = PositionModel(
+        id=str(uuid.uuid4()),
+        ticker=req.ticker.upper(),
+        shares=req.shares,
+        entry_price=req.entry_price,
+        entry_date=req.entry_date,
+    )
+    db.add(position)
+    db.commit()
+    db.refresh(position)
 
-    raw = _load_positions()
-    raw.append(position)
-    _save_positions(raw)
-
-    return Position(**position)
+    return Position(
+        id=position.id,
+        ticker=position.ticker,
+        shares=position.shares,
+        entry_price=position.entry_price,
+        entry_date=position.entry_date,
+    )
 
 
 @router.delete("/positions/{position_id}", status_code=204)
-async def delete_position(position_id: str) -> Response:
-    raw = _load_positions()
-    updated = [p for p in raw if p["id"] != position_id]
-    if len(updated) == len(raw):
+async def delete_position(position_id: str, db: Session = Depends(get_db)) -> Response:
+    position = db.query(PositionModel).filter(PositionModel.id == position_id).first()
+    if position is None:
         raise HTTPException(status_code=404, detail="Position not found.")
-    _save_positions(updated)
+    db.delete(position)
+    db.commit()
     return Response(status_code=204)
 
 
 @router.post("/positions/simulate", response_model=SimulatePortfolioResponse)
-async def simulate_portfolio(req: SimulatePortfolioRequest) -> SimulatePortfolioResponse:
-    raw = _load_positions()
+async def simulate_portfolio(
+    req: SimulatePortfolioRequest, db: Session = Depends(get_db)
+) -> SimulatePortfolioResponse:
+    raw = db.query(PositionModel).all()
     if not raw:
         raise HTTPException(status_code=422, detail="No positions in portfolio.")
 
     end = datetime.now().strftime("%Y-%m-%d")
     start = (datetime.now() - timedelta(days=req.history_days)).strftime("%Y-%m-%d")
 
-    unique_tickers = list({p["ticker"] for p in raw})
+    unique_tickers = list({p.ticker for p in raw})
 
     try:
         data = _fetcher.fetch_multiple_tickers(unique_tickers, start, end)

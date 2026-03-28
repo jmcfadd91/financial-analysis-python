@@ -1,36 +1,19 @@
 """GET/POST/DELETE /api/watchlist — watchlist management."""
 
-import json
 import logging
 from datetime import datetime, timedelta
-from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
+from sqlalchemy.orm import Session
 
 from api.schemas import AddWatchlistRequest, GetWatchlistResponse, WatchlistItem, _clean
 from src.analysis.technical import compute_rsi_ewm
 from src.data.fetcher import DataFetcher
+from src.db import WatchlistModel, get_db
 
 router = APIRouter()
 _fetcher = DataFetcher()
 logger = logging.getLogger(__name__)
-
-_PROJECT_ROOT = Path(__file__).parent.parent.parent
-_WATCHLIST_PATH = _PROJECT_ROOT / "data" / "watchlist.json"
-
-
-def _load_tickers() -> list[str]:
-    if not _WATCHLIST_PATH.exists():
-        return []
-    return json.loads(_WATCHLIST_PATH.read_text()).get("tickers", [])
-
-
-def _save_tickers(tickers: list[str]) -> None:
-    # Atomic write: write to temp then rename to prevent partial writes on concurrent requests
-    _WATCHLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _WATCHLIST_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"tickers": tickers}))
-    tmp.replace(_WATCHLIST_PATH)
 
 
 def _enrich(ticker: str) -> WatchlistItem:
@@ -64,35 +47,35 @@ def _enrich(ticker: str) -> WatchlistItem:
 
 
 @router.get("/watchlist", response_model=GetWatchlistResponse)
-async def get_watchlist() -> GetWatchlistResponse:
-    tickers = _load_tickers()
-    items = [_enrich(t) for t in tickers]
+async def get_watchlist(db: Session = Depends(get_db)) -> GetWatchlistResponse:
+    rows = db.query(WatchlistModel).all()
+    items = [_enrich(r.ticker) for r in rows]
     return GetWatchlistResponse(items=items)
 
 
 @router.post("/watchlist", response_model=WatchlistItem, status_code=201)
-async def add_to_watchlist(req: AddWatchlistRequest) -> WatchlistItem:
+async def add_to_watchlist(req: AddWatchlistRequest, db: Session = Depends(get_db)) -> WatchlistItem:
     ticker = req.ticker.upper().strip()
-    tickers = _load_tickers()
-    if ticker in tickers:
+
+    existing = db.query(WatchlistModel).filter(WatchlistModel.ticker == ticker).first()
+    if existing:
         raise HTTPException(status_code=422, detail=f"{ticker} is already in watchlist")
 
-    # Validate ticker exists
     item = _enrich(ticker)
     if item.current_price is None:
         raise HTTPException(status_code=422, detail=f"Could not fetch data for {ticker}")
 
-    tickers.append(ticker)
-    _save_tickers(tickers)
+    db.add(WatchlistModel(ticker=ticker))
+    db.commit()
     return item
 
 
 @router.delete("/watchlist/{ticker}", status_code=204)
-async def remove_from_watchlist(ticker: str) -> Response:
+async def remove_from_watchlist(ticker: str, db: Session = Depends(get_db)) -> Response:
     ticker = ticker.upper().strip()
-    tickers = _load_tickers()
-    if ticker not in tickers:
+    row = db.query(WatchlistModel).filter(WatchlistModel.ticker == ticker).first()
+    if row is None:
         raise HTTPException(status_code=404, detail=f"{ticker} not found in watchlist")
-    tickers.remove(ticker)
-    _save_tickers(tickers)
+    db.delete(row)
+    db.commit()
     return Response(status_code=204)
